@@ -13,16 +13,20 @@ export const handleAccountMatchRoutes: RouteHandler = async (context, services) 
     return true;
   }
 
-  if (context.method === 'POST' && context.path === 'accounts/link/mock') {
+  if (context.method === 'POST' && (context.path === 'accounts/link' || context.path === 'accounts/link/mock')) {
     const body = await readRequestBody(context);
+    const region = asString(body.region, 'INTERNATIONAL') as 'INTERNATIONAL' | 'CN';
     const account = await provider.linkMockAccount(
       asString(body.user_id),
-      asString(body.region, 'INTERNATIONAL') as 'INTERNATIONAL' | 'CN',
+      region,
       {
         gameName: typeof body.game_name === 'string' ? body.game_name : undefined,
         tagLine: typeof body.tag_line === 'string' ? body.tag_line : undefined,
       }
     );
+    if (region === 'INTERNATIONAL' && account.accountId.startsWith('riot-mock-')) {
+      throw new Error('REAL_ACCOUNT_LINK_DISABLED: Riot real provider is not enabled. Set RIOT_PROVIDER_ENABLED=true.');
+    }
     writeJson(context.res, 200, account);
     return true;
   }

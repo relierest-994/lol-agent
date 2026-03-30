@@ -435,8 +435,8 @@ export function useAgentShell(userId: string) {
     setChatAttachment(undefined);
   }
 
-  async function linkAccount() {
-    if (linkingAccount) return;
+  async function linkAccount(): Promise<boolean> {
+    if (linkingAccount) return false;
     if (region === 'INTERNATIONAL' && (!riotGameName.trim() || !riotTagLine.trim())) {
       setUiAlerts([
         {
@@ -446,7 +446,7 @@ export function useAgentShell(userId: string) {
           retryable: false,
         },
       ]);
-      return;
+      return false;
     }
     setLinkingAccount(true);
     try {
@@ -466,6 +466,7 @@ export function useAgentShell(userId: string) {
           retryable: false,
         },
       ]);
+      return true;
     } catch (error) {
       setUiAlerts([
         {
@@ -475,6 +476,7 @@ export function useAgentShell(userId: string) {
           retryable: true,
         },
       ]);
+      return false;
     } finally {
       setLinkingAccount(false);
     }
@@ -482,6 +484,10 @@ export function useAgentShell(userId: string) {
 
   async function runDeepReview() {
     await executeGoal('请对这局进行深度复盘。');
+  }
+
+  async function runBasicReview() {
+    await executeGoal('帮我复盘这局对局。');
   }
 
   async function runFollowupAsk(question?: string) {
@@ -680,6 +686,7 @@ export function useAgentShell(userId: string) {
     startPurchase,
     confirmPendingPayment,
     runDeepReview,
+    runBasicReview,
     runFollowupAsk,
     runVideoDiagnosis,
     pollTaskOnce,

@@ -4,10 +4,8 @@ import { loadRuntimeConfig } from '../infrastructure/config/runtime-config';
 let sharedClient: HttpClient | undefined;
 
 function isBackendApiEnabled(): boolean {
-  const processEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {};
-  const metaEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
-  const raw = processEnv.VITE_USE_BACKEND_API ?? metaEnv.VITE_USE_BACKEND_API ?? 'false';
-  return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
+  const config = loadRuntimeConfig();
+  return config.useBackendApi;
 }
 
 function getClient(): HttpClient {

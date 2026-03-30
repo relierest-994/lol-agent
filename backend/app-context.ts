@@ -80,15 +80,19 @@ export async function createBackendAppContext(): Promise<BackendAppContext> {
     dbHealth: () => getDbHealth(runtimeMode),
     recordTaskRun: (input) => {
       if (runtimeMode !== 'db') return;
-      insertAgentTaskRun({
-        task_run_id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-        user_id: input.userId,
-        session_id: input.sessionId,
-        intent: input.intent,
-        status: input.status,
-        payload: input.payload,
-        error_code: input.errorCode,
-      });
+      try {
+        insertAgentTaskRun({
+          task_run_id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          user_id: input.userId,
+          session_id: input.sessionId,
+          intent: input.intent,
+          status: input.status,
+          payload: input.payload,
+          error_code: input.errorCode,
+        });
+      } catch (error) {
+        console.warn('[backend] recordTaskRun failed:', error instanceof Error ? error.message : String(error));
+      }
     },
   };
 }

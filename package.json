@@ -5,19 +5,29 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start": "expo start --clear",
+    "start:web": "expo start --web --clear",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "backend:dev": "tsx backend/server.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "^54.0.0",
+    "expo-document-picker": "~14.0.8",
+    "expo-status-bar": "~3.0.9",
     "pg": "^8.20.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.0"
   },
   "devDependencies": {
-    "@types/react": "^18.3.7",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "~19.1.10",
+    "@types/react-dom": "~19.1.7",
     "@vitejs/plugin-react": "^4.4.1",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3",

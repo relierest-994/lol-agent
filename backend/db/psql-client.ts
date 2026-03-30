@@ -68,6 +68,9 @@ export function execPsqlScalar(sql: string): string {
 
 let persistentKvReady = false;
 let persistentKvInitError: Error | null = null;
+let agentTaskRunsReady = false;
+let agentTaskRunsInitError: Error | null = null;
+let agentTaskRunsDisabled = false;
 
 function ensurePersistentStateKvTable(): void {
   if (persistentKvInitError) throw persistentKvInitError;
@@ -102,6 +105,35 @@ function ensurePersistentStateKvTable(): void {
   }
 }
 
+function ensureAgentTaskRunsTable(): void {
+  if (agentTaskRunsDisabled) return;
+  if (agentTaskRunsInitError) throw agentTaskRunsInitError;
+  if (agentTaskRunsReady) return;
+
+  try {
+    execPsql(`
+      CREATE TABLE IF NOT EXISTS ${qualifiedTable('agent_task_runs')} (
+        task_run_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        trace_id TEXT,
+        correlation_id TEXT,
+        intent TEXT NOT NULL,
+        status TEXT NOT NULL,
+        payload JSONB NOT NULL,
+        error_code TEXT,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL
+      );
+    `);
+    agentTaskRunsReady = true;
+  } catch (error) {
+    agentTaskRunsInitError = error instanceof Error ? error : new Error('Failed to initialize agent_task_runs');
+    agentTaskRunsDisabled = true;
+    throw agentTaskRunsInitError;
+  }
+}
+
 export function insertAgentTaskRun(input: {
   task_run_id: string;
   user_id: string;
@@ -111,6 +143,8 @@ export function insertAgentTaskRun(input: {
   payload: unknown;
   error_code?: string;
 }): void {
+  ensureAgentTaskRunsTable();
+  if (!agentTaskRunsReady) return;
   const payload = JSON.stringify(input.payload ?? {});
   const errorCode = input.error_code ?? null;
   const values = [

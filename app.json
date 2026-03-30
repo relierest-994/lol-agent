@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "私有电竞教练",
+    "slug": "private-esports-coach",
+    "scheme": "lolagent",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0B1020"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

@@ -107,7 +107,7 @@ export class RealCapabilityProvider implements CapabilityProvider {
       'linkMockAccount',
       () =>
         this.appHttp.request<LinkedAccount>({
-          path: 'accounts/link/mock',
+          path: 'accounts/link',
           method: 'POST',
           body: {
             user_id: userId,
