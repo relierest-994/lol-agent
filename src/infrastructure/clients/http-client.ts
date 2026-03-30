@@ -61,6 +61,20 @@ export class HttpClient {
       }
     }
 
-    throw lastError instanceof Error ? lastError : new Error('HTTP request failed');
+    const normalized = this.normalizeNetworkError(lastError, url);
+    throw normalized;
+  }
+
+  private normalizeNetworkError(error: unknown, url: string): Error {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return new Error(`REQUEST_TIMEOUT: request to ${url} timed out`);
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    if (/Failed to fetch|fetch failed|ECONNREFUSED|ENOTFOUND|network/i.test(message)) {
+      return new Error(`NETWORK_ERROR: unable to reach ${url}. ${message}`);
+    }
+
+    return error instanceof Error ? error : new Error('HTTP request failed');
   }
 }

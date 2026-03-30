@@ -11,6 +11,7 @@ export interface OrchestratorInput {
   userId: string;
   region: Region;
   userInput: string;
+  preferredMatchId?: string;
   linkedAccount?: LinkedAccount;
   uploadedClip?: {
     file_name: string;
@@ -69,7 +70,14 @@ export class AgentOrchestrator {
       correlationId: session.correlationId,
     };
 
-    const execution = await this.executor.executePlan(session, plan, context, input.linkedAccount, input.uploadedClip);
+    const execution = await this.executor.executePlan(
+      session,
+      plan,
+      context,
+      input.linkedAccount,
+      input.uploadedClip,
+      input.preferredMatchId
+    );
     return this.synthesizer.synthesize(plan, execution);
   }
 }

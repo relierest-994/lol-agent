@@ -6,6 +6,14 @@ import { getLocalJobQueueRuntime } from '../../infrastructure/queue/job-queue.ru
 
 const runtimeRegistry = createCapabilityRegistry();
 
+const taskStatusLabel: Record<string, string> = {
+  PENDING: '排队中',
+  RUNNING: '执行中',
+  COMPLETED: '已完成',
+  FAILED: '失败',
+  NOT_FOUND: '未找到',
+};
+
 function buildContext(userId: string, region: Region): CapabilityExecutionContext {
   return {
     userId,
@@ -58,7 +66,7 @@ function normalizeDiagnosisResult(input: {
     overall_judgement: input.payload.render_payload.summary,
     likely_issue_types: [],
     key_moments: input.payload.render_payload.key_moments,
-    positional_or_trade_error: input.payload.structured_findings[0]?.insight ?? 'See structured findings',
+    positional_or_trade_error: input.payload.structured_findings[0]?.insight ?? '请查看结构化诊断结果',
     execution_or_decision_hints: input.payload.structured_findings.map((item) => item.advice),
     next_action_advice: input.payload.recommended_next_questions,
     structured_findings: input.payload.structured_findings,
@@ -104,7 +112,7 @@ export async function pollVideoDiagnosisTask(input: {
     if (task.status === 'PENDING' || task.status === 'RUNNING') {
       return {
         status: task.status,
-        message: `Diagnosis task is ${task.status.toLowerCase()}.`,
+        message: `视频诊断任务状态：${taskStatusLabel[task.status] ?? task.status}。`,
       };
     }
     if (task.status === 'FAILED') {
@@ -112,7 +120,7 @@ export async function pollVideoDiagnosisTask(input: {
         status: 'FAILED',
         error: {
           code: 'PROVIDER_ERROR',
-          message: task.error_message ?? 'Diagnosis task failed',
+          message: task.error_message ?? '视频诊断任务执行失败',
           retryable: true,
         },
       };
@@ -126,7 +134,7 @@ export async function pollVideoDiagnosisTask(input: {
         status: 'FAILED',
         error: {
           code: 'NOT_FOUND',
-          message: 'Diagnosis result not found',
+          message: '未找到视频诊断结果',
           retryable: true,
         },
       };
@@ -160,7 +168,7 @@ export async function pollVideoDiagnosisTask(input: {
   if (taskState === 'PENDING' || taskState === 'RUNNING') {
     return {
       status: taskState,
-      message: `Diagnosis task is ${taskState.toLowerCase()}.`,
+      message: `视频诊断任务状态：${taskStatusLabel[taskState] ?? taskState}。`,
     };
   }
 
@@ -169,7 +177,7 @@ export async function pollVideoDiagnosisTask(input: {
       status: 'FAILED',
       error: {
         code: 'PROVIDER_ERROR',
-        message: status.result.data.error_message ?? 'Diagnosis task failed',
+        message: status.result.data.error_message ?? '视频诊断任务执行失败',
         retryable: true,
       },
     };
@@ -247,7 +255,7 @@ export async function pollDeepReviewTask(input: {
     if (status.status === 'NOT_FOUND' || status.status === 'PENDING' || status.status === 'RUNNING') {
       return {
         status: status.status,
-        message: `Deep review task is ${status.status.toLowerCase()}.`,
+        message: `深度复盘任务状态：${taskStatusLabel[status.status] ?? status.status}。`,
       };
     }
     if (status.status === 'FAILED') {
@@ -255,7 +263,7 @@ export async function pollDeepReviewTask(input: {
         status: 'FAILED',
         error: {
           code: 'PROVIDER_ERROR',
-          message: status.task?.error_message ?? 'Deep review task failed',
+          message: status.task?.error_message ?? '深度复盘任务执行失败',
           retryable: true,
         },
       };
@@ -268,7 +276,7 @@ export async function pollDeepReviewTask(input: {
     if (!result) {
       return {
         status: 'NOT_FOUND',
-        message: 'Deep review result is not ready.',
+        message: '深度复盘结果尚未就绪。',
       };
     }
     return {
@@ -306,7 +314,7 @@ export async function pollDeepReviewTask(input: {
   if (taskState === 'NOT_FOUND' || taskState === 'PENDING' || taskState === 'RUNNING') {
     return {
       status: taskState,
-      message: `Deep review task is ${taskState.toLowerCase()}.`,
+      message: `深度复盘任务状态：${taskStatusLabel[taskState] ?? taskState}。`,
     };
   }
   if (taskState === 'FAILED') {
@@ -314,7 +322,7 @@ export async function pollDeepReviewTask(input: {
       status: 'FAILED',
       error: {
         code: 'PROVIDER_ERROR',
-        message: status.result.data.task?.error_message ?? 'Deep review task failed',
+        message: status.result.data.task?.error_message ?? '深度复盘任务执行失败',
         retryable: true,
       },
     };
@@ -340,7 +348,7 @@ export async function pollDeepReviewTask(input: {
   if (result.result.data.status !== 'COMPLETED' || !result.result.data.result) {
     return {
       status: 'NOT_FOUND',
-      message: 'Deep review result is not ready.',
+      message: '深度复盘结果尚未就绪。',
     };
   }
 

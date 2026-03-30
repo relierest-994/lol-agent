@@ -10,6 +10,8 @@ const accountInputSchema: CapabilitySchema = {
   properties: {
     userId: { type: 'string', description: 'User id' },
     region: { type: 'string', description: 'Selected region', enum: regionEnum },
+    gameName: { type: 'string', description: 'Riot game name for international account linking' },
+    tagLine: { type: 'string', description: 'Riot tag line for international account linking' },
   },
 };
 
@@ -66,6 +68,8 @@ export const accountLinkStatusCapability: CapabilityDefinition<
 export interface AccountLinkMockInput {
   userId: string;
   region: Region;
+  gameName?: string;
+  tagLine?: string;
 }
 
 export interface AccountLinkMockOutput {
@@ -92,7 +96,10 @@ export const accountLinkMockCapability: CapabilityDefinition<AccountLinkMockInpu
     if (!input.userId || !input.region) return invalidInput('userId and region are required');
 
     try {
-      const account = await provider.linkMockAccount(input.userId, input.region);
+      const account = await provider.linkMockAccount(input.userId, input.region, {
+        gameName: input.gameName,
+        tagLine: input.tagLine,
+      });
       return {
         ok: true,
         data: { account },

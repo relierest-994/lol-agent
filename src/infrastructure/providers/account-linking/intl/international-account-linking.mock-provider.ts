@@ -19,7 +19,7 @@ export class InternationalAccountLinkingMockProvider implements AccountLinkingPr
     return { linked: Boolean(account), account };
   }
 
-  async linkAccountMock(userId: string): Promise<LinkedAccount> {
+  async linkAccountMock(userId: string, _request?: { gameName?: string; tagLine?: string }): Promise<LinkedAccount> {
     const account: LinkedAccount = {
       ...baseIntlAccount,
       region: this.region,

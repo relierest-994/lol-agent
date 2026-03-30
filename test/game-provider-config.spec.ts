@@ -8,6 +8,7 @@ describe('Game provider config validation', () => {
         enabled: true,
         apiBaseUrl: 'https://kr.api.riotgames.com',
         apiKey: undefined,
+        regionalRouting: 'asia',
       },
       wegame: {
         enabled: false,
@@ -24,6 +25,7 @@ describe('Game provider config validation', () => {
       riot: {
         enabled: false,
         apiBaseUrl: 'https://kr.api.riotgames.com',
+        regionalRouting: 'asia',
       },
       wegame: {
         enabled: true,

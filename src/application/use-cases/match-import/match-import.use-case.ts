@@ -1,5 +1,6 @@
 ﻿import type { MatchDetail, MatchSummary, MatchTimeline, Region } from '../../../domain';
 import type { MatchImportProviderRegistry } from '../../../infrastructure/providers/match-import/match-import-provider.registry';
+import { callBackendApi } from '../../http-api.client';
 
 export interface QueryRecentMatchesInput {
   region: Region;
@@ -72,4 +73,23 @@ export class MatchImportUseCase {
       timeline,
     };
   }
+}
+
+export async function fetchRecentMatchesForLinkedAccount(input: {
+  userId: string;
+  region: Region;
+  accountId: string;
+  limit?: number;
+}): Promise<MatchSummary[]> {
+  const limit = input.limit ?? 10;
+  const response = await callBackendApi<{ summaries: MatchSummary[]; details: MatchDetail[] }>({
+    path: 'matches/recent',
+    method: 'POST',
+    body: {
+      region: input.region,
+      account_id: input.accountId,
+      limit,
+    },
+  });
+  return response.summaries;
 }

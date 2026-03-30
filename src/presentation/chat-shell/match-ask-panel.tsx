@@ -24,23 +24,24 @@ export function MatchAskPanel({
 }: MatchAskPanelProps) {
   return (
     <section className="panel">
-      <h2>Match Ask Panel</h2>
+      <h2>对局追问</h2>
       <textarea
         rows={2}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder="Ask a follow-up question for current match context..."
+        placeholder="围绕当前对局继续提问..."
       />
       <div className="control-row">
         <button type="button" disabled={running} onClick={onAsk}>
-          {running ? 'Planning answer...' : 'Ask Agent'}
+          {running ? '正在组织回答...' : '发起追问'}
         </button>
       </div>
       {lockedInfo && <p className="locked">{lockedInfo}</p>}
+
       {answer && (
         <div className="report-grid">
           <article className="report-card">
-            <h3>Answer Summary</h3>
+            <h3>回答摘要</h3>
             <p>{answer.summary}</p>
           </article>
           {answer.sections.map((section) => (
@@ -57,7 +58,8 @@ export function MatchAskPanel({
           ))}
         </div>
       )}
-      <h3>Suggested Questions</h3>
+
+      <h3>推荐追问</h3>
       <SuggestedQuestionList questions={suggestedQuestions} onSelect={onUseSuggested} disabled={running} />
     </section>
   );

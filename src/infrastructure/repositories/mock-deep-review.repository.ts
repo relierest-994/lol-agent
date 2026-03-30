@@ -16,6 +16,18 @@ function contextKey(userId: string, matchId: string): string {
   return `${userId}:${matchId}`;
 }
 
+function normalizeMapEntries<T>(input: unknown): Array<[string, T]> {
+  if (Array.isArray(input)) {
+    return input.filter((entry): entry is [string, T] => {
+      return Array.isArray(entry) && entry.length === 2 && typeof entry[0] === 'string';
+    });
+  }
+  if (input && typeof input === 'object') {
+    return Object.entries(input as Record<string, unknown>) as Array<[string, T]>;
+  }
+  return [];
+}
+
 export class MockDeepReviewRepository {
   private readonly tasks = new Map<string, DeepReviewTask>();
   private readonly latestTaskByUserMatch = new Map<string, string>();
@@ -163,14 +175,14 @@ export class MockDeepReviewRepository {
 
   private hydrate(): void {
     const state = this.store.read<{
-      tasks: Array<[string, DeepReviewTask]>;
-      latestTaskByUserMatch: Array<[string, string]>;
-      results: Array<[string, DeepReviewResult]>;
-      latestResultByUserMatch: Array<[string, string]>;
-      contexts: Array<[string, MatchAnalysisContext]>;
-      conversations: Array<[string, MatchConversationSession]>;
-      conversationByUserMatch: Array<[string, string]>;
-      messages: Array<[string, MatchConversationMessage[]]>;
+      tasks?: unknown;
+      latestTaskByUserMatch?: unknown;
+      results?: unknown;
+      latestResultByUserMatch?: unknown;
+      contexts?: unknown;
+      conversations?: unknown;
+      conversationByUserMatch?: unknown;
+      messages?: unknown;
     }>('state');
     if (!state) return;
     this.tasks.clear();
@@ -181,14 +193,16 @@ export class MockDeepReviewRepository {
     this.conversations.clear();
     this.conversationByUserMatch.clear();
     this.messages.clear();
-    for (const [k, v] of state.tasks) this.tasks.set(k, v);
-    for (const [k, v] of state.latestTaskByUserMatch) this.latestTaskByUserMatch.set(k, v);
-    for (const [k, v] of state.results) this.results.set(k, v);
-    for (const [k, v] of state.latestResultByUserMatch) this.latestResultByUserMatch.set(k, v);
-    for (const [k, v] of state.contexts) this.contexts.set(k, v);
-    for (const [k, v] of state.conversations) this.conversations.set(k, v);
-    for (const [k, v] of state.conversationByUserMatch) this.conversationByUserMatch.set(k, v);
-    for (const [k, v] of state.messages) this.messages.set(k, v);
+    for (const [k, v] of normalizeMapEntries<DeepReviewTask>(state.tasks)) this.tasks.set(k, v);
+    for (const [k, v] of normalizeMapEntries<string>(state.latestTaskByUserMatch)) this.latestTaskByUserMatch.set(k, v);
+    for (const [k, v] of normalizeMapEntries<DeepReviewResult>(state.results)) this.results.set(k, v);
+    for (const [k, v] of normalizeMapEntries<string>(state.latestResultByUserMatch))
+      this.latestResultByUserMatch.set(k, v);
+    for (const [k, v] of normalizeMapEntries<MatchAnalysisContext>(state.contexts)) this.contexts.set(k, v);
+    for (const [k, v] of normalizeMapEntries<MatchConversationSession>(state.conversations))
+      this.conversations.set(k, v);
+    for (const [k, v] of normalizeMapEntries<string>(state.conversationByUserMatch)) this.conversationByUserMatch.set(k, v);
+    for (const [k, v] of normalizeMapEntries<MatchConversationMessage[]>(state.messages)) this.messages.set(k, v);
   }
 
   private persist(): void {

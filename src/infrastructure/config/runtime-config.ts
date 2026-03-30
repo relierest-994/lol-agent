@@ -23,6 +23,8 @@ export interface RuntimeConfig {
   paymentApiUrl: string;
   paymentApiKey?: string;
   paymentWebhookSecret?: string;
+  aiFollowupPaid: boolean;
+  clipReviewPaid: boolean;
 }
 
 function readEnv(): Record<string, string | undefined> {
@@ -33,6 +35,20 @@ function readEnv(): Record<string, string | undefined> {
 
   const meta = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
   return { ...processEnv, ...meta };
+}
+
+function isServerRuntime(): boolean {
+  return typeof window === 'undefined';
+}
+
+function pickEnv(
+  env: Record<string, string | undefined>,
+  keys: { server?: string; client?: string; shared?: string; defaultValue?: string }
+): string | undefined {
+  if (isServerRuntime()) {
+    return (keys.server ? env[keys.server] : undefined) ?? (keys.shared ? env[keys.shared] : undefined) ?? keys.defaultValue;
+  }
+  return (keys.client ? env[keys.client] : undefined) ?? (keys.shared ? env[keys.shared] : undefined) ?? keys.defaultValue;
 }
 
 function asBool(value: string | undefined, defaultValue: boolean): boolean {
@@ -49,18 +65,47 @@ function asNum(value: string | undefined, defaultValue: number): number {
 export function loadRuntimeConfig(): RuntimeConfig {
   const env = readEnv();
 
-  const providerModeRaw = env.VITE_APP_PROVIDER_MODE ?? env.APP_PROVIDER_MODE ?? 'real';
+  const providerModeRaw = pickEnv(env, {
+    client: 'VITE_APP_PROVIDER_MODE',
+    defaultValue: 'real',
+  })!;
   const providerMode: RuntimeMode = providerModeRaw === 'mock' ? 'mock' : 'real';
 
   return {
-    appEnv: env.VITE_APP_ENV ?? env.APP_ENV ?? 'dev',
+    appEnv: pickEnv(env, {
+      server: 'APP_ENV',
+      client: 'VITE_APP_ENV',
+      defaultValue: 'dev',
+    })!,
     providerMode,
-    useBackendApi: asBool(env.VITE_USE_BACKEND_API ?? env.APP_USE_BACKEND_API, false),
+    useBackendApi: asBool(pickEnv(env, { client: 'VITE_USE_BACKEND_API' }), false),
     queueRuntimeMode: (env.QUEUE_RUNTIME_MODE ?? env.APP_QUEUE_RUNTIME_MODE ?? 'http') === 'local' ? 'local' : 'http',
-    allowMockFallback: asBool(env.VITE_APP_ALLOW_MOCK_FALLBACK ?? env.APP_ALLOW_MOCK_FALLBACK, true),
-    apiBaseUrl: env.VITE_API_BASE_URL ?? env.API_BASE_URL ?? 'http://localhost:8080',
-    requestTimeoutMs: asNum(env.VITE_REQUEST_TIMEOUT_MS ?? env.REQUEST_TIMEOUT_MS, 10000),
-    requestRetries: asNum(env.VITE_REQUEST_RETRIES ?? env.REQUEST_RETRIES, 1),
+    allowMockFallback: asBool(
+      pickEnv(env, {
+        server: 'APP_ALLOW_MOCK_FALLBACK',
+        client: 'VITE_APP_ALLOW_MOCK_FALLBACK',
+      }),
+      true
+    ),
+    apiBaseUrl: pickEnv(env, {
+      server: 'API_BASE_URL',
+      client: 'VITE_API_BASE_URL',
+      defaultValue: 'http://localhost:8080',
+    })!,
+    requestTimeoutMs: asNum(
+      pickEnv(env, {
+        server: 'REQUEST_TIMEOUT_MS',
+        client: 'VITE_REQUEST_TIMEOUT_MS',
+      }),
+      10000
+    ),
+    requestRetries: asNum(
+      pickEnv(env, {
+        server: 'REQUEST_RETRIES',
+        client: 'VITE_REQUEST_RETRIES',
+      }),
+      1
+    ),
 
     llmApiUrl: env.LLM_API_URL ?? env.VITE_LLM_API_URL ?? 'https://api.openai.com/v1/chat/completions',
     llmApiKey: env.LLM_API_KEY ?? env.VITE_LLM_API_KEY,
@@ -80,5 +125,7 @@ export function loadRuntimeConfig(): RuntimeConfig {
     paymentApiUrl: env.PAYMENT_API_URL ?? env.VITE_PAYMENT_API_URL ?? 'http://localhost:8080/payments',
     paymentApiKey: env.PAYMENT_API_KEY ?? env.VITE_PAYMENT_API_KEY,
     paymentWebhookSecret: env.PAYMENT_WEBHOOK_SECRET,
+    aiFollowupPaid: asBool(env.APP_AI_FOLLOWUP_PAID ?? env.VITE_APP_AI_FOLLOWUP_PAID, true),
+    clipReviewPaid: asBool(env.APP_CLIP_REVIEW_PAID ?? env.VITE_APP_CLIP_REVIEW_PAID, true),
   };
 }

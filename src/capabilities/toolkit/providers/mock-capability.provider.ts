@@ -1,4 +1,4 @@
-import { entitlementBillingService } from '../../../application/services/entitlement-billing.service';
+﻿import { entitlementBillingService } from '../../../application/services/entitlement-billing.service';
 import { videoDiagnosisService } from '../../../application/services/video-diagnosis.service';
 import { MatchImportUseCase } from '../../../application/use-cases/match-import/match-import.use-case';
 import type {
@@ -25,15 +25,84 @@ import type { CapabilityProvider } from '../types';
 
 const sharedDeepReviewRepository = new MockDeepReviewRepository();
 
-function deepKeywords(question: string): boolean {
-  return /对线|中期|节奏|资源|团战|出装|符文|技能|位置|细节|拆解|为什么/.test(question);
-}
-
 function summarizeBasic(report: BasicReviewReport): string {
   const overall = report.sections[0]?.lines[0] ?? '本局存在可优化空间';
   const issue = report.sections[2]?.lines[0] ?? '中期决策需要优化';
   const advice = report.sections[4]?.lines[0] ?? '建议先稳住节奏';
   return `${overall}。核心问题：${issue}。建议：${advice}`;
+}
+
+function inferFocus(question: string): 'EARLY' | 'MID' | 'TEAMFIGHT' | 'OBJECTIVE' | 'VISION' | 'GENERAL' {
+  if (/(前期|对线|开局|1级|3级|6级|early|lane)/i.test(question)) return 'EARLY';
+  if (/(中期|转线|节奏|运营|mid)/i.test(question)) return 'MID';
+  if (/(团战|开团|站位|进场|秒表|teamfight)/i.test(question)) return 'TEAMFIGHT';
+  if (/(小龙|大龙|先锋|资源|objective|baron|dragon)/i.test(question)) return 'OBJECTIVE';
+  if (/(视野|眼位|排眼|河道|vision|ward)/i.test(question)) return 'VISION';
+  return 'GENERAL';
+}
+
+function pickTimelineEvidence(
+  timeline: import('../../../domain').MatchTimeline | undefined,
+  focus: 'EARLY' | 'MID' | 'TEAMFIGHT' | 'OBJECTIVE' | 'VISION' | 'GENERAL'
+): string[] {
+  if (!timeline?.events?.length) return [];
+
+  const matchByFocus = timeline.events.filter((event) => {
+    if (focus === 'EARLY') return event.minute <= 10;
+    if (focus === 'MID') return event.minute > 10 && event.minute <= 22;
+    if (focus === 'TEAMFIGHT') return event.type === 'KILL' || event.type === 'DEATH' || event.type === 'TEAMFIGHT';
+    if (focus === 'OBJECTIVE') return event.type === 'OBJECTIVE';
+    if (focus === 'VISION') return event.type === 'VISION';
+    return true;
+  });
+
+  return matchByFocus.slice(0, 4).map((event) => `${event.minute}分：${event.note}`);
+}
+
+function composeContextAwareAnswer(input: {
+  question: string;
+  match: MatchDetail;
+  basic: BasicReviewReport;
+  deep?: DeepReviewResult;
+  timelineEvidence: string[];
+}): MatchAskAnswer['answer'] {
+  const { question, match, basic, deep, timelineEvidence } = input;
+  const focus = inferFocus(question);
+  const keyIssue = basic.sections[2]?.lines[0] ?? '中期节奏转换仍有优化空间';
+  const keyAdvice = basic.sections[4]?.lines[0] ?? '建议先信息后动作，降低高风险换子';
+  const deepInsight = deep?.render_payload.sections[0]?.insight;
+  const kda = `${match.kills}/${match.deaths}/${match.assists}`;
+
+  const focusLabel: Record<typeof focus, string> = {
+    EARLY: '前期/对线',
+    MID: '中期运营',
+    TEAMFIGHT: '团战处理',
+    OBJECTIVE: '资源决策',
+    VISION: '视野博弈',
+    GENERAL: '全局复盘',
+  };
+
+  return {
+    summary: `关于你问的“${question}”，结合这局 ${match.championName}（${match.queue}，${match.outcome === 'WIN' ? '胜' : '负'}，KDA ${kda}），当前最关键的问题是：${deepInsight ?? keyIssue}`,
+    sections: [
+      {
+        section_title: `结论（${focusLabel[focus]}）`,
+        insight: deepInsight ?? keyIssue,
+        evidence: timelineEvidence.length > 0 ? timelineEvidence : [basic.sections[1]?.lines[0] ?? '已结合本局复盘关键点'],
+        advice: keyAdvice,
+        tags: ['match-context', focusLabel[focus], 'timeline'],
+        severity: 'MEDIUM',
+      },
+      {
+        section_title: '下一局可执行动作',
+        insight: '先把高风险决策从“习惯动作”降为“有信息再动作”，你的稳定性会明显提升。',
+        evidence: [basic.sections[1]?.lines[1] ?? '资源与团战节点是本局胜负分水岭'],
+        advice: `1）10分钟前优先稳线和河道信息；2）中期资源前20秒站位；3）团战前确认关键技能与视野。`,
+        tags: ['action-plan', 'coaching'],
+        severity: 'LOW',
+      },
+    ],
+  };
 }
 
 export class MockCapabilityProvider implements CapabilityProvider {
@@ -88,9 +157,13 @@ export class MockCapabilityProvider implements CapabilityProvider {
     return status.account;
   }
 
-  async linkMockAccount(userId: string, region: Region): Promise<LinkedAccount> {
+  async linkMockAccount(
+    userId: string,
+    region: Region,
+    request?: { gameName?: string; tagLine?: string }
+  ): Promise<LinkedAccount> {
     const provider = this.registries.accountRegistry.get(region);
-    return provider.linkAccountMock(userId);
+    return provider.linkAccountMock(userId, request);
   }
 
   async listRecentMatches(
@@ -112,6 +185,15 @@ export class MockCapabilityProvider implements CapabilityProvider {
     try {
       const bundle = await this.matchUseCase.getMatchBundle(region, matchId);
       return bundle.detail;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async getMatchTimeline(region: Region, matchId: string): Promise<import('../../../domain').MatchTimeline | undefined> {
+    try {
+      const bundle = await this.matchUseCase.getMatchBundle(region, matchId);
+      return bundle.timeline;
     } catch {
       return undefined;
     }
@@ -345,7 +427,7 @@ export class MockCapabilityProvider implements CapabilityProvider {
       match_id: input.matchId,
       role: 'USER',
       content: input.question,
-      references: [],
+      ref: [],
       created_at: input.nowIso,
     });
 
@@ -363,67 +445,40 @@ export class MockCapabilityProvider implements CapabilityProvider {
       };
     }
 
-    const basic = await this.generateBasicReview(match, input.nowIso);
+    const [basic, timeline] = await Promise.all([
+      this.generateBasicReview(match, input.nowIso),
+      this.getMatchTimeline(input.region, input.matchId),
+    ]);
     sharedDeepReviewRepository.markBasicReviewGenerated(input.userId, input.matchId, input.region, input.nowIso);
 
     const deep = sharedDeepReviewRepository.getLatestResult(input.userId, input.matchId);
-    const needsDeep = deepKeywords(input.question);
-    if (needsDeep && !deep) {
-      return {
-        status: 'NEEDS_DEEP_REVIEW',
-        cited_from: { basic_review: true, deep_review: false },
-        suggested_prompts: [
-          'Run deep review first, then tell me the highest-priority fix.',
-          'Which mid-game exchange was the worst by timeline?',
-          'Give me three actionable changes for vision and positioning.',
-        ],
-      };
-    }
-
-    const answerSummary = deep
-      ? `Based on deep review: ${deep.render_payload.sections[0]?.insight ?? 'Key issue is mid-game tempo and resource conversion.'}`
-      : summarizeBasic(basic);
-
-    const sections = deep
-      ? deep.render_payload.sections.slice(0, 2).map((section) => ({
-          section_title: section.section_title,
-          insight: section.insight,
-          evidence: section.evidence,
-          advice: section.advice,
-          tags: section.tags,
-          severity: section.severity,
-        }))
-      : [
-          {
-            section_title: 'Match Follow-up',
-            insight: answerSummary,
-            evidence: [basic.sections[1]?.lines[0] ?? 'Basic review key factor available'],
-            advice: basic.sections[4]?.lines[0] ?? 'Stabilize tempo and verify vision before re-engage',
-            tags: ['basic-review', 'match-context'],
-            severity: 'MEDIUM' as const,
-          },
-        ];
+    const focus = inferFocus(input.question);
+    const timelineEvidence = pickTimelineEvidence(timeline, focus);
+    const answer = composeContextAwareAnswer({
+      question: input.question,
+      match,
+      basic,
+      deep,
+      timelineEvidence,
+    });
 
     const response: MatchAskAnswer = {
       status: 'ANSWERED',
-      answer: {
-        summary: answerSummary,
-        sections,
-      },
+      answer,
       cited_from: {
         basic_review: true,
-        deep_review: Boolean(deep),
+        deep_review: Boolean(deep || timelineEvidence.length),
       },
       suggested_prompts: deep
         ? [
-            'If I can change one habit, which one gives highest impact?',
-            'Give me action checklist for minute 10/15/20.',
-            'Provide a safer variant against the same matchup.',
+            '如果只改一个习惯，优先改哪个收益最高？',
+            '请给我 10/15/20 分钟的执行清单。',
+            '同样对线情况下，更稳妥的处理方案是什么？',
           ]
         : [
-            'If we need finer mid-game rotation analysis, trigger deep review.',
-            'Which exact timestamp had the costliest decision?',
-            'What should I prioritize in first 3 minutes next game?',
+            '这局我最需要先修正的失误是什么？',
+            '哪一个时间点的决策代价最大？',
+            '下一局前 3 分钟我该优先做什么？',
           ],
     };
 
@@ -432,8 +487,8 @@ export class MockCapabilityProvider implements CapabilityProvider {
       user_id: input.userId,
       match_id: input.matchId,
       role: 'AGENT',
-      content: response.answer?.summary ?? 'Answered',
-      references: deep ? ['BASIC_REVIEW', 'DEEP_REVIEW'] : ['BASIC_REVIEW'],
+      content: response.answer?.summary ?? summarizeBasic(basic),
+      ref: deep ? ['BASIC_REVIEW', 'DEEP_REVIEW'] : ['BASIC_REVIEW'],
       created_at: input.nowIso,
     });
 
@@ -444,15 +499,15 @@ export class MockCapabilityProvider implements CapabilityProvider {
     const deep = sharedDeepReviewRepository.getLatestResult(input.userId, input.matchId);
     if (deep) {
       return [
-        'Which teamfight timestamp has the worst positioning?',
-        'When should I pivot build defensively in this game?',
-        'How do I convert lane lead into objective control?',
+        '哪波团战的站位问题最严重？',
+        '这局什么时候应该转成更保守的出装？',
+        '我该怎么把对线优势转成目标控制？',
       ];
     }
     return [
-      'What are my top three issues this game?',
-      'Why did my mid-game collapse?',
-      'Give me a deep-review-focused question template.',
+      '这局我最需要先改掉的三个问题是什么？',
+      '为什么我的中期会断节奏？',
+      '下一局开局 3 分钟我该怎么打更稳？',
     ];
   }
 

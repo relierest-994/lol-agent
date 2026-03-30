@@ -1,10 +1,10 @@
 ﻿import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { AppShell } from './presentation/app-shell/app-shell';
+import { LoginGate } from './presentation/auth/login-gate';
 import './styles.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <AppShell />
+    <LoginGate />
   </React.StrictMode>
 );

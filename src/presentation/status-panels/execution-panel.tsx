@@ -17,8 +17,8 @@ export function ExecutionPanel({ result }: ExecutionPanelProps) {
   if (!result) {
     return (
       <section className="panel">
-        <h2>Execution Panel</h2>
-        <p className="muted">等待 Agent 执行...</p>
+        <h2>执行面板</h2>
+        <p className="muted">等待任务执行...</p>
       </section>
     );
   }
@@ -29,7 +29,7 @@ export function ExecutionPanel({ result }: ExecutionPanelProps) {
 
   return (
     <section className="panel">
-      <h2>Execution Panel</h2>
+      <h2>执行面板</h2>
       <div className="execution-grid">
         <article>
           <h3>当前计划</h3>

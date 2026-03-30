@@ -159,7 +159,7 @@ export interface MatchConversationMessage {
   match_id: string;
   role: 'USER' | 'AGENT';
   content: string;
-  references: Array<'BASIC_REVIEW' | 'DEEP_REVIEW'>;
+  ref: Array<'BASIC_REVIEW' | 'DEEP_REVIEW'>;
   created_at: string;
 }
 

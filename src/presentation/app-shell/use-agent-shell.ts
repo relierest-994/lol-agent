@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import {
   confirmPayment,
   createOrder,
   createPaymentCheckout,
+  fetchRecentMatchesForLinkedAccount,
+  linkAccountUseCase,
   queryCurrentEntitlements,
   runReviewUseCase,
 } from '../../application';
@@ -12,12 +14,11 @@ import type {
   EntitlementFeature,
   EntitlementState,
   LinkedAccount,
+  MatchSummary,
   Region,
   VideoDiagnosisResult,
 } from '../../domain';
 import { pollDeepReviewTask, pollVideoDiagnosisTask } from './agent-shell-runtime';
-
-const USER_ID = 'phase2-user';
 
 export interface ChatMessage {
   id: string;
@@ -112,7 +113,7 @@ function renderPayloadAlert(payload: AgentRenderPayload | undefined): UiAlert | 
     return {
       level: 'WARN',
       code: payload.reason_code,
-      message: `${payload.display_message} (${payload.required_inputs.join(', ')})`,
+      message: `${payload.display_message}（${payload.required_inputs.join(', ')}）`,
       retryable: false,
     };
   }
@@ -128,32 +129,39 @@ function sessionFromResult(result: RunResult | undefined): AgentSession | undefi
   return result?.session;
 }
 
-export function useAgentShell() {
+export function useAgentShell(userId: string) {
   const [region, setRegion] = useState<Region>('INTERNATIONAL');
   const [linkedAccount, setLinkedAccount] = useState<LinkedAccount>();
-  const [input, setInput] = useState('Help me review my latest match.');
+  const [riotGameName, setRiotGameName] = useState('');
+  const [riotTagLine, setRiotTagLine] = useState('');
+  const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
+  const [linkingAccount, setLinkingAccount] = useState(false);
   const [result, setResult] = useState<RunResult>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [entitlement, setEntitlement] = useState<EntitlementState>();
   const [entitlementLoading, setEntitlementLoading] = useState(true);
   const [entitlementError, setEntitlementError] = useState<string>();
-  const [askInput, setAskInput] = useState('Which one habit should I fix first this match?');
-  const [clipQuestion, setClipQuestion] = useState('Please diagnose why this skirmish failed.');
+  const [askInput, setAskInput] = useState('这局我最该先改掉的一个习惯是什么？');
+  const [clipQuestion, setClipQuestion] = useState('请诊断这波团战为什么会输。');
   const [clipDraft, setClipDraft] = useState<ClipDraft>(DEFAULT_CLIP);
+  const [chatAttachment, setChatAttachment] = useState<ClipDraft>();
   const [uiAlerts, setUiAlerts] = useState<UiAlert[]>([]);
+  const [recentMatches, setRecentMatches] = useState<MatchSummary[]>([]);
+  const [selectedMatchId, setSelectedMatchId] = useState<string>();
+  const [loadingRecentMatches, setLoadingRecentMatches] = useState(false);
   const [taskObservation, setTaskObservation] = useState<TaskObservation>();
   const [polledDeepReview, setPolledDeepReview] = useState<DeepReviewResult>();
   const [polledVideoDiagnosis, setPolledVideoDiagnosis] = useState<VideoDiagnosisResult>();
   const [paymentState, setPaymentState] = useState<PaymentUiState>({
     status: 'IDLE',
-    message: 'No payment in progress.',
+    message: '当前没有进行中的支付流程。',
   });
 
   useEffect(() => {
     void refreshEntitlement();
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     const payloadAlert = renderPayloadAlert(result?.renderPayload);
@@ -167,29 +175,25 @@ export function useAgentShell() {
       void pollTaskOnce();
     }, 2000);
     return () => clearInterval(timer);
-  }, [taskObservation, running]);
+  }, [taskObservation, running, result, region, userId]);
 
   const accountLabel = useMemo(() => {
-    if (!linkedAccount) return 'No linked account';
+    if (!linkedAccount) return '未绑定';
     return `${linkedAccount.gameName}#${linkedAccount.tagLine}`;
   }, [linkedAccount]);
 
   const displayDeepReview = result?.deepReview ?? polledDeepReview;
   const displayVideoDiagnosis = result?.videoDiagnosis ?? polledVideoDiagnosis;
 
-  const quickPrompts = [
-    'Help me review my latest match.',
-    'Run deep review for this match.',
-    'Explain my mid game mistakes in this match.',
-  ];
+  const quickPrompts = ['我这局中期为什么会断节奏？', '这把最该先改的一个习惯是什么？', '请按时间点告诉我3个关键失误。'];
 
   const suggestedQuestions = useMemo(() => {
     const fromVideo = displayVideoDiagnosis?.recommended_next_questions ?? [];
     if (fromVideo.length > 0) return fromVideo;
     return [
-      'If I only change one habit, what gives the biggest impact?',
-      'Give me a 10/15/20 minute action checklist.',
-      'What was the single most expensive decision in this match?',
+      '如果只能改一个习惯，优先改什么？',
+      '给我 10/15/20 分钟行动清单。',
+      '这局代价最大的决策失误是什么？',
     ];
   }, [displayVideoDiagnosis?.recommended_next_questions]);
 
@@ -197,10 +201,10 @@ export function useAgentShell() {
     setEntitlementLoading(true);
     setEntitlementError(undefined);
     try {
-      const response = await queryCurrentEntitlements({ userId: USER_ID });
+      const response = await queryCurrentEntitlements({ userId });
       setEntitlement(response.state);
     } catch (error) {
-      setEntitlementError(error instanceof Error ? error.message : 'Failed to refresh entitlement');
+      setEntitlementError(error instanceof Error ? error.message : '权益状态刷新失败');
     } finally {
       setEntitlementLoading(false);
     }
@@ -235,6 +239,18 @@ export function useAgentShell() {
 
   async function executeGoal(prompt: string, uploadedClip?: ClipDraft) {
     if (!prompt.trim() || running) return;
+    if (!linkedAccount) {
+      setUiAlerts([
+        {
+          level: 'WARN',
+          code: 'ACCOUNT_NOT_LINKED',
+          message: '请先绑定账号，再发起复盘请求。',
+          retryable: false,
+        },
+      ]);
+      return;
+    }
+
     const now = new Date().toISOString();
     setMessages((prev) => [
       ...prev,
@@ -249,9 +265,10 @@ export function useAgentShell() {
     setRunning(true);
     try {
       const response = await runReviewUseCase({
-        userId: USER_ID,
+        userId,
         region,
         userInput: prompt,
+        preferredMatchId: selectedMatchId,
         linkedAccount,
         uploadedClip,
       });
@@ -260,7 +277,7 @@ export function useAgentShell() {
       setResult(response);
       updatePendingObservation(response);
 
-      const summary = response.finalResponse?.summary ?? response.error ?? 'Agent completed execution.';
+      const summary = response.finalResponse?.summary ?? response.error ?? 'Agent 已完成执行。';
       setMessages((prev) => [
         ...prev,
         {
@@ -299,7 +316,7 @@ export function useAgentShell() {
       const clipAsset = session.assetContext.clipAsset;
       if (!taskId || !selectedMatchId || !clipAsset?.asset_id) return;
       const polled = await pollVideoDiagnosisTask({
-        userId: USER_ID,
+        userId,
         region,
         taskId,
         matchId: selectedMatchId,
@@ -311,7 +328,7 @@ export function useAgentShell() {
           task_type: 'VIDEO_DIAGNOSIS',
           status: 'COMPLETED',
           task_id: taskId,
-          message: 'Video diagnosis completed.',
+          message: '视频诊断已完成。',
           updated_at: new Date().toISOString(),
         });
         setUiAlerts([]);
@@ -347,7 +364,7 @@ export function useAgentShell() {
 
     if (!selectedMatchId) return;
     const polled = await pollDeepReviewTask({
-      userId: USER_ID,
+      userId,
       region,
       matchId: selectedMatchId,
     });
@@ -356,7 +373,7 @@ export function useAgentShell() {
       setTaskObservation({
         task_type: 'DEEP_REVIEW',
         status: 'COMPLETED',
-        message: 'Deep review completed.',
+        message: '深度复盘已完成。',
         updated_at: new Date().toISOString(),
       });
       setUiAlerts([]);
@@ -388,11 +405,83 @@ export function useAgentShell() {
   }
 
   async function submitGoal() {
-    await executeGoal(input.trim());
+    const prompt = input.trim();
+    if (!prompt && !chatAttachment) return;
+
+    const hasBaseReview = Boolean(result?.report || displayDeepReview || polledDeepReview);
+    if (!chatAttachment && !hasBaseReview) {
+      setUiAlerts([
+        {
+          level: 'WARN',
+          code: 'BASE_REVIEW_REQUIRED',
+          message: '请先选择对局并点击“生成完整复盘”，再进行 AI 追问。',
+          retryable: false,
+        },
+      ]);
+      return;
+    }
+
+    if (!chatAttachment) {
+      const followupPrompt = /^追问[:：]/.test(prompt) ? prompt : `追问：${prompt}`;
+      await executeGoal(followupPrompt);
+      return;
+    }
+
+    const multimodalPrompt = /(视频|片段|素材|图片|图像|诊断)/.test(prompt)
+      ? prompt
+      : `请结合我上传的素材进行分析：${prompt || '帮我诊断这个素材的关键问题。'}`;
+
+    await executeGoal(multimodalPrompt, chatAttachment);
+    setChatAttachment(undefined);
+  }
+
+  async function linkAccount() {
+    if (linkingAccount) return;
+    if (region === 'INTERNATIONAL' && (!riotGameName.trim() || !riotTagLine.trim())) {
+      setUiAlerts([
+        {
+          level: 'WARN',
+          code: 'ACCOUNT_INPUT_REQUIRED',
+          message: '国际服绑定需要填写 Riot ID（gameName）和 TagLine。',
+          retryable: false,
+        },
+      ]);
+      return;
+    }
+    setLinkingAccount(true);
+    try {
+      const account = await linkAccountUseCase({
+        userId,
+        region,
+        gameName: region === 'INTERNATIONAL' ? riotGameName.trim() : undefined,
+        tagLine: region === 'INTERNATIONAL' ? riotTagLine.trim() : undefined,
+      });
+      setLinkedAccount(account);
+      await refreshRecentMatches(account);
+      setUiAlerts([
+        {
+          level: 'INFO',
+          code: 'ACCOUNT_LINKED',
+          message: `账号绑定成功：${account.gameName}#${account.tagLine}`,
+          retryable: false,
+        },
+      ]);
+    } catch (error) {
+      setUiAlerts([
+        {
+          level: 'ERROR',
+          code: 'ACCOUNT_LINK_FAILED',
+          message: error instanceof Error ? error.message : '账号绑定失败',
+          retryable: true,
+        },
+      ]);
+    } finally {
+      setLinkingAccount(false);
+    }
   }
 
   async function runDeepReview() {
-    await executeGoal('Run deep review for this match.');
+    await executeGoal('请对这局进行深度复盘。');
   }
 
   async function runFollowupAsk(question?: string) {
@@ -403,28 +492,32 @@ export function useAgentShell() {
   }
 
   async function runVideoDiagnosis() {
-    await executeGoal(clipQuestion.trim(), clipDraft);
+    const prompt = clipQuestion.trim();
+    const multimodalPrompt = /(视频|片段|素材|图片|图像|诊断)/.test(prompt)
+      ? prompt
+      : `请诊断我上传的视频片段：${prompt || '请分析这段素材的关键失误。'}`;
+    await executeGoal(multimodalPrompt, clipDraft);
   }
 
   async function startPurchase(featureCode: EntitlementFeature) {
     const planCode = featureToPlanCode[featureCode];
     setPaymentState({
       status: 'CREATING_ORDER',
-      message: 'Creating payment order...',
+      message: '正在创建支付订单...',
       feature_code: featureCode,
     });
-    const created = await createOrder({ userId: USER_ID, planCode, featureCode });
+    const created = await createOrder({ userId, planCode, featureCode });
     if (!created.ok) {
       setPaymentState({
         status: 'FAILED',
-        message: `Order creation failed: ${created.reason}`,
+        message: `创建订单失败：${created.reason}`,
         feature_code: featureCode,
       });
       return;
     }
 
     const checkout = await createPaymentCheckout({
-      userId: USER_ID,
+      userId,
       orderId: created.order.id,
       amountCents: created.order.amountCents,
       currency: created.order.currency,
@@ -435,7 +528,7 @@ export function useAgentShell() {
 
     setPaymentState({
       status: 'AWAITING_PAYMENT',
-      message: 'Checkout created. Confirm payment callback when done.',
+      message: '收银台已创建，完成支付后请点击“确认支付回调”。',
       checkout_url: checkout.checkout_url,
       order_id: created.order.id,
       feature_code: featureCode,
@@ -447,7 +540,7 @@ export function useAgentShell() {
     setPaymentState((prev) => ({
       ...prev,
       status: 'CONFIRMING',
-      message: 'Confirming payment callback and refreshing entitlement...',
+      message: '正在确认支付回调并刷新权益...',
     }));
     const confirmed = await confirmPayment({
       orderId: paymentState.order_id,
@@ -458,7 +551,7 @@ export function useAgentShell() {
       setPaymentState((prev) => ({
         ...prev,
         status: 'FAILED',
-        message: `Payment confirmation failed: ${confirmed.reason}`,
+        message: `支付确认失败：${confirmed.reason}`,
       }));
       return;
     }
@@ -467,14 +560,14 @@ export function useAgentShell() {
     setPaymentState((prev) => ({
       ...prev,
       status: 'SUCCESS',
-      message: 'Payment confirmed and entitlement refreshed.',
+      message: '支付已确认，权益已刷新。',
     }));
     setMessages((prev) => [
       ...prev,
       {
         id: `a-pay-${Date.now()}`,
         role: 'agent',
-        content: `Payment confirmed: ${paymentState.feature_code ?? 'feature'} is now refreshed.`,
+        content: `支付确认成功：${paymentState.feature_code ?? '能力'} 已刷新。`,
         at: new Date().toISOString(),
       },
     ]);
@@ -483,7 +576,19 @@ export function useAgentShell() {
   function switchRegion(nextRegion: Region) {
     setRegion(nextRegion);
     setLinkedAccount(undefined);
+    setRecentMatches([]);
+    setSelectedMatchId(undefined);
+    setRiotGameName('');
+    setRiotTagLine('');
     setTaskObservation(undefined);
+    setUiAlerts([
+      {
+        level: 'INFO',
+        code: 'REGION_CHANGED',
+        message: '已切换分区，请先重新绑定该分区账号。',
+        retryable: false,
+      },
+    ]);
   }
 
   function applyQuickPrompt(prompt: string) {
@@ -499,13 +604,49 @@ export function useAgentShell() {
     if (selected.result.linkedAccount) setLinkedAccount(selected.result.linkedAccount);
   }
 
+  async function refreshRecentMatches(accountOverride?: LinkedAccount) {
+    const account = accountOverride ?? linkedAccount;
+    if (!account) return;
+    setLoadingRecentMatches(true);
+    try {
+      const list = await fetchRecentMatchesForLinkedAccount({
+        userId,
+        region,
+        accountId: account.accountId,
+        limit: 10,
+      });
+      setRecentMatches(list);
+      setSelectedMatchId((prev) => {
+        if (prev && list.some((item) => item.matchId === prev)) return prev;
+        return list[0]?.matchId;
+      });
+    } catch (error) {
+      setUiAlerts([
+        {
+          level: 'WARN',
+          code: 'MATCH_LIST_LOAD_FAILED',
+          message: error instanceof Error ? error.message : '最近对局加载失败',
+          retryable: true,
+        },
+      ]);
+    } finally {
+      setLoadingRecentMatches(false);
+    }
+  }
+
   return {
     region,
     linkedAccount,
+    riotGameName,
+    riotTagLine,
     accountLabel,
     input,
     running,
+    linkingAccount,
     result,
+    recentMatches,
+    selectedMatchId,
+    loadingRecentMatches,
     messages,
     history,
     quickPrompts,
@@ -515,6 +656,7 @@ export function useAgentShell() {
     askInput,
     clipQuestion,
     clipDraft,
+    chatAttachment,
     suggestedQuestions,
     uiAlerts,
     taskObservation,
@@ -525,7 +667,13 @@ export function useAgentShell() {
     setAskInput,
     setClipQuestion,
     setClipDraft,
+    setChatAttachment,
+    setRiotGameName,
+    setRiotTagLine,
+    setSelectedMatchId,
     switchRegion,
+    linkAccount,
+    refreshRecentMatches,
     applyQuickPrompt,
     submitGoal,
     replayHistory,

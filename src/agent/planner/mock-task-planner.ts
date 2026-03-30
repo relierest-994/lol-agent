@@ -11,40 +11,44 @@ function followupNeedsDeep(input: string): boolean {
 function reviewSteps(goal: UserGoal): PlanStep[] {
   if (goal.intent === 'DEEP_REVIEW') {
     return [
-      { stepId: 'S6', title: 'Check deep review status', action: 'review.deep.status' },
-      { stepId: 'S7', title: 'Generate deep review', action: 'review.deep.generate', requiresEntitlement: 'DEEP_REVIEW' },
-      { stepId: 'S8', title: 'Get deep review result', action: 'review.deep.get', requiresEntitlement: 'DEEP_REVIEW' },
+      { stepId: 'S6', title: '生成基础复盘', action: 'review.generate_basic', requiresEntitlement: 'BASIC_REVIEW' },
+      { stepId: 'S7', title: '生成结构化深度分析', action: 'review.deep.generate' },
+      { stepId: 'S8', title: '读取深度分析结果', action: 'review.deep.get' },
     ];
   }
 
   if (goal.intent === 'AI_FOLLOWUP') {
     if (followupNeedsDeep(goal.rawInput)) {
       return [
-        { stepId: 'S6', title: 'Check deep review status', action: 'review.deep.status' },
-        { stepId: 'S7', title: 'Generate deep review if needed', action: 'review.deep.generate', requiresEntitlement: 'DEEP_REVIEW' },
-        { stepId: 'S8', title: 'Ask match follow-up with context', action: 'review.ask.match', requiresEntitlement: 'AI_FOLLOWUP' },
+        { stepId: 'S6', title: '检查深度复盘状态', action: 'review.deep.status' },
+        { stepId: 'S7', title: '按需生成深度复盘', action: 'review.deep.generate' },
+        { stepId: 'S8', title: '结合上下文进行追问回答', action: 'review.ask.match', requiresEntitlement: 'AI_FOLLOWUP' },
       ];
     }
 
-    return [{ stepId: 'S6', title: 'Ask match follow-up directly', action: 'review.ask.match', requiresEntitlement: 'AI_FOLLOWUP' }];
+    return [{ stepId: 'S6', title: '直接回答追问', action: 'review.ask.match', requiresEntitlement: 'AI_FOLLOWUP' }];
   }
 
   if (goal.intent === 'CLIP_REVIEW') {
     return [
-      { stepId: 'S6', title: 'Upload short clip asset', action: 'asset.video.upload' },
-      { stepId: 'S7', title: 'Create video diagnosis task', action: 'diagnosis.video.create', requiresEntitlement: 'CLIP_REVIEW' },
-      { stepId: 'S8', title: 'Check video diagnosis status', action: 'diagnosis.video.status', requiresEntitlement: 'CLIP_REVIEW' },
-      { stepId: 'S9', title: 'Get video diagnosis result', action: 'diagnosis.video.get', requiresEntitlement: 'CLIP_REVIEW' },
+      { stepId: 'S6', title: '上传视频片段素材', action: 'asset.video.upload' },
+      { stepId: 'S7', title: '创建视频诊断任务', action: 'diagnosis.video.create', requiresEntitlement: 'CLIP_REVIEW' },
+      { stepId: 'S8', title: '检查视频诊断状态', action: 'diagnosis.video.status', requiresEntitlement: 'CLIP_REVIEW' },
+      { stepId: 'S9', title: '读取视频诊断结果', action: 'diagnosis.video.get', requiresEntitlement: 'CLIP_REVIEW' },
     ];
   }
 
   if (goal.intent === 'ENTITLEMENT_VIEW') {
     return [
-      { stepId: 'S6', title: 'Explain deep review entitlement', action: 'entitlement.explain' },
+      { stepId: 'S6', title: '解释深度复盘权益状态', action: 'entitlement.explain' },
     ];
   }
 
-  return [{ stepId: 'S6', title: 'Generate basic review', action: 'review.generate_basic', requiresEntitlement: 'BASIC_REVIEW' }];
+  return [
+    { stepId: 'S6', title: '生成基础复盘', action: 'review.generate_basic', requiresEntitlement: 'BASIC_REVIEW' },
+    { stepId: 'S7', title: '生成结构化深度分析', action: 'review.deep.generate' },
+    { stepId: 'S8', title: '读取深度分析结果', action: 'review.deep.get' },
+  ];
 }
 
 export class MockTaskPlanner implements TaskPlanner {
@@ -56,17 +60,17 @@ export class MockTaskPlanner implements TaskPlanner {
         planId: `plan-${Date.now()}`,
         createdAt,
         goal,
-        summary: 'Cannot recognize review goal; return clarification guidance.',
+        summary: '无法识别复盘目标，返回澄清指引。',
         steps: [],
       };
     }
 
     const core: PlanStep[] = [
-      { stepId: 'S1', title: 'Resolve region context', action: 'region.select' },
-      { stepId: 'S2', title: 'Check account link status', action: 'account.link_status' },
-      { stepId: 'S3', title: 'Link account via mock if needed', action: 'account.link_mock' },
-      { stepId: 'S4', title: 'Fetch recent matches', action: 'match.list_recent' },
-      { stepId: 'S5', title: 'Select target match', action: 'match.select_target' },
+      { stepId: 'S1', title: '解析大区上下文', action: 'region.select' },
+      { stepId: 'S2', title: '检查账号绑定状态', action: 'account.link_status' },
+      { stepId: 'S3', title: '必要时执行账号绑定', action: 'account.link_mock' },
+      { stepId: 'S4', title: '拉取最近对局', action: 'match.list_recent' },
+      { stepId: 'S5', title: '选择目标对局', action: 'match.select_target' },
     ];
 
     const capabilitySteps = reviewSteps(goal);
@@ -76,8 +80,8 @@ export class MockTaskPlanner implements TaskPlanner {
       planId: `plan-${Date.now()}`,
       createdAt,
       goal,
-      summary: 'Run agent main loop: context, account, match, capability execution, synthesis.',
-      steps: [...core, ...capabilitySteps, { stepId: finalStepId, title: 'Synthesize final response', action: 'internal.summarize' }],
+      summary: '执行主链路：上下文解析、账号、对局、能力调用、结果汇总。',
+      steps: [...core, ...capabilitySteps, { stepId: finalStepId, title: '汇总最终响应', action: 'internal.summarize' }],
     };
   }
 }

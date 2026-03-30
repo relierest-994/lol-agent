@@ -119,3 +119,12 @@ CREATE INDEX IF NOT EXISTS idx_linked_accounts_user_region ON linked_accounts(us
 CREATE INDEX IF NOT EXISTS idx_imported_matches_user_match ON imported_match_summaries(user_id, match_id);
 CREATE INDEX IF NOT EXISTS idx_basic_review_user_match ON basic_review_reports(user_id, match_id);
 CREATE INDEX IF NOT EXISTS idx_agent_task_runs_session ON agent_task_runs(session_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS persistent_state_kv (
+  namespace TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (namespace, key)
+);

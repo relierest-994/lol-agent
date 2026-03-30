@@ -98,16 +98,25 @@ export class RealCapabilityProvider implements CapabilityProvider {
     );
   }
 
-  async linkMockAccount(userId: string, region: Region): Promise<LinkedAccount> {
+  async linkMockAccount(
+    userId: string,
+    region: Region,
+    request?: { gameName?: string; tagLine?: string }
+  ): Promise<LinkedAccount> {
     return this.withFallback(
       'linkMockAccount',
       () =>
         this.appHttp.request<LinkedAccount>({
           path: 'accounts/link/mock',
           method: 'POST',
-          body: { user_id: userId, region },
+          body: {
+            user_id: userId,
+            region,
+            game_name: request?.gameName,
+            tag_line: request?.tagLine,
+          },
         }),
-      () => this.fallback.linkMockAccount(userId, region)
+      () => this.fallback.linkMockAccount(userId, region, request)
     );
   }
 
@@ -137,6 +146,18 @@ export class RealCapabilityProvider implements CapabilityProvider {
           method: 'GET',
         }),
       () => this.fallback.getMatchDetail(region, matchId)
+    );
+  }
+
+  async getMatchTimeline(region: Region, matchId: string): Promise<import('../../../domain').MatchTimeline | undefined> {
+    return this.withFallback(
+      'getMatchTimeline',
+      () =>
+        this.appHttp.request<import('../../../domain').MatchTimeline | undefined>({
+          path: `matches/${encodeURIComponent(matchId)}/timeline?region=${encodeURIComponent(region)}`,
+          method: 'GET',
+        }),
+      () => this.fallback.getMatchTimeline(region, matchId)
     );
   }
 

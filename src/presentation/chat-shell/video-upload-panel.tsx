@@ -1,5 +1,5 @@
-import type { ClipDraft } from '../app-shell/use-agent-shell';
-import type { TaskObservation } from '../app-shell/use-agent-shell';
+import type { ChangeEvent } from 'react';
+import type { ClipDraft, TaskObservation } from '../app-shell/use-agent-shell';
 
 interface VideoUploadPanelProps {
   draft: ClipDraft;
@@ -22,36 +22,52 @@ export function VideoUploadPanel({
   lockedInfo,
   taskObservation,
 }: VideoUploadPanelProps) {
+  const statusLabel: Record<string, string> = {
+    PENDING: '排队中',
+    RUNNING: '执行中',
+    COMPLETED: '已完成',
+    FAILED: '失败',
+    NOT_FOUND: '未找到',
+  };
+
   const taskMessage =
-    taskObservation?.task_type === 'VIDEO_DIAGNOSIS' ? `${taskObservation.status}: ${taskObservation.message}` : undefined;
+    taskObservation?.task_type === 'VIDEO_DIAGNOSIS'
+      ? `${statusLabel[taskObservation.status] ?? taskObservation.status}：${taskObservation.message}`
+      : undefined;
+
+  function applyFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    onChange({
+      file_name: file.name,
+      mime_type: file.type || inferMimeType(file.name),
+      size_bytes: file.size,
+      duration_seconds: file.type.startsWith('image/') ? 5 : 20,
+    });
+  }
+
   return (
     <section className="panel">
-      <h2>Video Upload Panel</h2>
+      <h2>多模态素材诊断</h2>
       <div className="report-grid">
         <label>
-          File Name
-          <input
-            value={draft.file_name}
-            onChange={(event) => onChange({ ...draft, file_name: event.target.value })}
-          />
+          选择文件
+          <input type="file" accept="video/*,image/*" onChange={applyFile} />
         </label>
         <label>
-          Mime Type
-          <select
-            value={draft.mime_type}
-            onChange={(event) => onChange({ ...draft, mime_type: event.target.value })}
-          >
-            <option value="video/mp4">video/mp4</option>
-            <option value="video/quicktime">video/quicktime</option>
-            <option value="video/webm">video/webm</option>
-          </select>
+          文件名
+          <input value={draft.file_name} onChange={(event) => onChange({ ...draft, file_name: event.target.value })} />
         </label>
         <label>
-          Size (MB)
+          格式
+          <input value={draft.mime_type} onChange={(event) => onChange({ ...draft, mime_type: event.target.value })} />
+        </label>
+        <label>
+          大小（MB）
           <input
             type="number"
             min={1}
-            value={Math.round(draft.size_bytes / (1024 * 1024))}
+            value={Math.max(1, Math.round(draft.size_bytes / (1024 * 1024)))}
             onChange={(event) =>
               onChange({
                 ...draft,
@@ -61,7 +77,7 @@ export function VideoUploadPanel({
           />
         </label>
         <label>
-          Duration (sec)
+          时长（秒）
           <input
             type="number"
             min={1}
@@ -70,22 +86,34 @@ export function VideoUploadPanel({
           />
         </label>
       </div>
+
       <textarea
         rows={2}
         value={question}
         onChange={(event) => onQuestionChange(event.target.value)}
-        placeholder="Describe what you want diagnosed in this clip..."
+        placeholder="例如：请诊断这波团战我为什么会先倒。"
       />
+
       <div className="control-row">
         <button type="button" disabled={running} onClick={onDiagnose}>
-          {running ? 'Running diagnosis task...' : 'Run Clip Diagnosis'}
+          {running ? '诊断任务执行中...' : '开始素材诊断'}
         </button>
       </div>
-      <p className="muted">
-        Limits: max 60s, recommended 10-30s, max 50MB, one clip per diagnosis.
-      </p>
+
+      <p className="muted">支持视频/图片；建议 10-30 秒片段，最大 50MB。</p>
       {lockedInfo && <p className="locked">{lockedInfo}</p>}
-      {taskMessage && <p className="muted">{taskMessage}</p>}
+      {taskMessage && <p className={taskObservation?.status === 'FAILED' ? 'error' : 'muted'}>{taskMessage}</p>}
     </section>
   );
+}
+
+function inferMimeType(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase();
+  if (ext === 'mp4') return 'video/mp4';
+  if (ext === 'mov') return 'video/quicktime';
+  if (ext === 'webm') return 'video/webm';
+  if (ext === 'png') return 'image/png';
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'webp') return 'image/webp';
+  return 'application/octet-stream';
 }

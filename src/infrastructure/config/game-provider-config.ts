@@ -2,6 +2,7 @@ export interface RiotProviderConfig {
   enabled: boolean;
   apiBaseUrl: string;
   apiKey?: string;
+  regionalRouting: 'americas' | 'asia' | 'europe' | 'sea';
 }
 
 export interface WegameProviderConfig {
@@ -44,6 +45,7 @@ export function loadGameProviderConfig(): GameProviderConfig {
       enabled: asBool(env.RIOT_PROVIDER_ENABLED, false),
       apiBaseUrl: asUrl(env.RIOT_API_BASE_URL, 'https://REGION.api.riotgames.com'),
       apiKey: env.RIOT_API_KEY,
+      regionalRouting: asRiotRouting(env.RIOT_REGIONAL_ROUTING),
     },
     wegame: {
       enabled: asBool(env.WEGAME_PROVIDER_ENABLED, false),
@@ -57,6 +59,14 @@ export function loadGameProviderConfig(): GameProviderConfig {
   };
 }
 
+function asRiotRouting(raw: string | undefined): RiotProviderConfig['regionalRouting'] {
+  const normalized = raw?.trim().toLowerCase();
+  if (normalized === 'americas' || normalized === 'asia' || normalized === 'europe' || normalized === 'sea') {
+    return normalized;
+  }
+  return 'asia';
+}
+
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
 }
@@ -67,6 +77,9 @@ export function validateGameProviderConfig(config: GameProviderConfig): GameProv
   if (config.riot.enabled) {
     if (!isHttpUrl(config.riot.apiBaseUrl)) errors.push('RIOT_API_BASE_URL must be a valid http(s) URL');
     if (!config.riot.apiKey) errors.push('RIOT_API_KEY is required when RIOT_PROVIDER_ENABLED=true');
+    if (!['americas', 'asia', 'europe', 'sea'].includes(config.riot.regionalRouting)) {
+      errors.push('RIOT_REGIONAL_ROUTING must be one of: americas, asia, europe, sea');
+    }
   }
 
   if (config.wegame.enabled) {

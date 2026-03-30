@@ -6,6 +6,7 @@ export interface RunReviewInput {
   userId: string;
   region: Region;
   userInput: string;
+  preferredMatchId?: string;
   linkedAccount?: LinkedAccount;
   uploadedClip?: {
     file_name: string;

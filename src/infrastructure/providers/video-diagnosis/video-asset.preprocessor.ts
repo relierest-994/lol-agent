@@ -29,8 +29,8 @@ export const DEFAULT_VIDEO_UPLOAD_CONSTRAINTS: VideoUploadConstraints = {
   recommendedMinDurationSeconds: 10,
   recommendedMaxDurationSeconds: 30,
   maxSizeBytes: 50 * 1024 * 1024,
-  allowedMimeTypes: ['video/mp4', 'video/quicktime', 'video/webm'],
-  allowedExtensions: ['mp4', 'mov', 'webm'],
+  allowedMimeTypes: ['video/mp4', 'video/quicktime', 'video/webm', 'image/jpeg', 'image/png', 'image/webp'],
+  allowedExtensions: ['mp4', 'mov', 'webm', 'jpg', 'jpeg', 'png', 'webp'],
 };
 
 export class VideoAssetPreprocessor {

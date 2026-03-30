@@ -104,13 +104,18 @@ export interface CapabilityDefinition<TInput, TOutput> extends CapabilityMeta {
 
 export interface CapabilityProvider {
   getLinkedAccount: (userId: string, region: Region) => Promise<import('../../domain').LinkedAccount | undefined>;
-  linkMockAccount: (userId: string, region: Region) => Promise<import('../../domain').LinkedAccount>;
+  linkMockAccount: (
+    userId: string,
+    region: Region,
+    request?: { gameName?: string; tagLine?: string }
+  ) => Promise<import('../../domain').LinkedAccount>;
   listRecentMatches: (
     region: Region,
     accountId: string,
     limit: number
   ) => Promise<{ summaries: import('../../domain').MatchSummary[]; details: import('../../domain').MatchDetail[] }>;
   getMatchDetail: (region: Region, matchId: string) => Promise<import('../../domain').MatchDetail | undefined>;
+  getMatchTimeline: (region: Region, matchId: string) => Promise<import('../../domain').MatchTimeline | undefined>;
   uploadVideoAsset: (input: {
     user_id: string;
     match_id: string;

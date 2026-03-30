@@ -84,6 +84,26 @@ interface StepResult {
   data?: unknown;
 }
 
+const actionSummaryMap: Partial<Record<CapabilityId, string>> = {
+  'region.select': '大区上下文解析完成',
+  'account.link_status': '账号绑定状态检查完成',
+  'account.link_mock': '账号绑定流程完成',
+  'match.list_recent': '最近对局拉取完成',
+  'match.select_target': '目标对局选择完成',
+  'review.generate_basic': '基础复盘生成完成',
+  'review.deep.status': '深度复盘状态检查完成',
+  'review.deep.generate': '深度复盘生成完成',
+  'review.deep.get': '深度复盘结果读取完成',
+  'review.ask.match': '追问回答生成完成',
+  'review.ask.suggested_prompts': '推荐追问生成完成',
+  'asset.video.upload': '视频素材上传登记完成',
+  'diagnosis.video.create': '视频诊断任务创建完成',
+  'diagnosis.video.status': '视频诊断状态检查完成',
+  'diagnosis.video.get': '视频诊断结果读取完成',
+  'entitlement.explain': '权益解释完成',
+  'usage.consume': '额度扣减完成',
+};
+
 export class CapabilityExecutor {
   private readonly permissionService: PermissionService;
 
@@ -99,7 +119,8 @@ export class CapabilityExecutor {
     plan: AgentPlan,
     context: CapabilityExecutionContext,
     inputAccount?: LinkedAccount,
-    uploadedClip?: UploadedClipInput
+    uploadedClip?: UploadedClipInput,
+    preferredMatchId?: string
   ): Promise<AgentExecutionOutput> {
     const toolCalls: ToolCallSummary[] = [];
     const state: ExecutorState = {
@@ -147,13 +168,13 @@ export class CapabilityExecutor {
           stepId: step.stepId,
           action: step.action,
           ok: true,
-          summary: 'Final summary generated',
+          summary: '最终结果已汇总',
         });
-        this.sessionManager.markStepDone(session, step.stepId, 'Final summary generated');
+        this.sessionManager.markStepDone(session, step.stepId, '最终结果已汇总');
         continue;
       }
 
-      const result = await this.executeStep(step, context, session, state, uploadedClip);
+      const result = await this.executeStep(step, context, session, state, uploadedClip, preferredMatchId);
       toolCalls.push({ capability: step.action, summary: result.summary, ok: result.ok });
 
       this.sessionManager.recordCapabilityResult(session, {
@@ -232,14 +253,14 @@ export class CapabilityExecutor {
         } else if (result.retryable) {
           state.renderPayload = {
             state: 'RETRYABLE_ERROR',
-            display_message: result.error ?? 'Temporary provider error',
+            display_message: result.error ?? '服务暂时不可用，请稍后重试',
             reason_code: result.errorCode ?? 'PROVIDER_RETRYABLE',
             retry_after_seconds: 20,
           };
           this.sessionManager.appendLog(session, {
             level: 'ERROR',
             event: 'RETRYABLE_ERROR_RETURNED',
-            message: result.error ?? 'Temporary provider error',
+            message: result.error ?? '服务暂时不可用，请稍后重试',
             stepId: step.stepId,
             action: step.action,
             errorCode: result.errorCode ?? 'PROVIDER_RETRYABLE',
@@ -292,7 +313,8 @@ export class CapabilityExecutor {
     context: CapabilityExecutionContext,
     session: AgentSession,
     state: ExecutorState,
-    uploadedClip?: UploadedClipInput
+    uploadedClip?: UploadedClipInput,
+    preferredMatchId?: string
   ): Promise<StepResult> {
     if (step.action === 'region.select') {
       const result = await this.registry.invoke({
@@ -314,7 +336,11 @@ export class CapabilityExecutor {
       });
       if (result.result.ok) {
         const data = result.result.data as { linked: boolean; account?: LinkedAccount };
-        if (data.linked && data.account) state.linkedAccount = data.account;
+        if (data.linked && data.account) {
+          state.linkedAccount = data.account;
+        } else {
+          state.linkedAccount = undefined;
+        }
       }
       return this.asSummary(step.action, result);
     }
@@ -342,7 +368,7 @@ export class CapabilityExecutor {
       if (!state.linkedAccount) {
         return {
           ok: false,
-          summary: 'Missing linked account',
+          summary: '缺少绑定账号',
           error: 'No linked account, cannot import matches',
           errorCode: 'CONTEXT_INCOMPLETE',
           requiredInputs: ['linked_account'],
@@ -379,6 +405,7 @@ export class CapabilityExecutor {
         context,
         input: {
           matches: state.matches,
+          preferredMatchId,
         },
       });
       if (result.result.ok) {
@@ -407,7 +434,7 @@ export class CapabilityExecutor {
       if (!state.linkedAccount || !state.selectedMatchId) {
         return {
           ok: false,
-          summary: 'Missing review input',
+          summary: '基础复盘输入不完整',
           error: 'Missing accountId or matchId for basic review',
           errorCode: 'CONTEXT_INCOMPLETE',
           requiredInputs: ['account_id', 'match_id'],
@@ -435,7 +462,7 @@ export class CapabilityExecutor {
       if (!state.selectedMatchId) {
         return {
           ok: false,
-          summary: 'Missing match',
+          summary: '缺少目标对局',
           error: 'Missing matchId for deep status',
           errorCode: 'CONTEXT_INCOMPLETE',
           requiredInputs: ['match_id'],
@@ -496,7 +523,7 @@ export class CapabilityExecutor {
       if (!state.selectedMatchId) {
         return {
           ok: false,
-          summary: 'Missing match',
+          summary: '缺少目标对局',
           error: 'Missing matchId for deep review get',
           errorCode: 'CONTEXT_INCOMPLETE',
           requiredInputs: ['match_id'],
@@ -521,7 +548,7 @@ export class CapabilityExecutor {
       if (!state.selectedMatchId) {
         return {
           ok: false,
-          summary: 'Missing match',
+          summary: '缺少目标对局',
           error: 'Missing matchId for follow-up question',
           errorCode: 'CONTEXT_INCOMPLETE',
           requiredInputs: ['match_id'],
@@ -545,7 +572,7 @@ export class CapabilityExecutor {
       if (!asked.result.ok) return this.asSummary(step.action, asked);
 
       const data = asked.result.data as {
-        status: 'ANSWERED' | 'NEEDS_DEEP_REVIEW' | 'PAYWALL_REQUIRED';
+        status: 'ANSWERED' | 'PAYWALL_REQUIRED';
         answer?: MatchAskAnswer['answer'];
         paywall_action?: {
           feature_code: EntitlementFeature;
@@ -556,7 +583,7 @@ export class CapabilityExecutor {
       };
 
       if (data.status === 'PAYWALL_REQUIRED') {
-        const message = data.paywall_action?.display_message ?? 'Follow-up is locked';
+        const message = data.paywall_action?.display_message ?? '追问能力未解锁';
         return {
           ok: false,
           summary: message,
@@ -572,69 +599,10 @@ export class CapabilityExecutor {
         };
       }
 
-      if (data.status === 'NEEDS_DEEP_REVIEW') {
-        if (!state.linkedAccount) {
-          return {
-            ok: false,
-            summary: 'Need deep review first',
-            error: 'Missing accountId for deep review generation',
-            errorCode: 'CONTEXT_INCOMPLETE',
-            requiredInputs: ['account_id'],
-          };
-        }
-        const deep = await this.registry.invoke({
-          id: 'review.deep.generate',
-          context,
-          input: {
-            user_id: session.userId,
-            region: session.region,
-            account_id: state.linkedAccount.accountId,
-            match_id: state.selectedMatchId,
-            authorization_context: {
-              entitlement_checked: true,
-            },
-          },
-        });
-        if (!deep.result.ok) return this.asSummary('review.deep.generate', deep);
-
-        const retry = await this.registry.invoke({
-          id: 'review.ask.match',
-          context,
-          input: {
-            user_id: session.userId,
-            region: session.region,
-            match_id: state.selectedMatchId,
-            question,
-            authorization_context: {
-              entitlement_checked: true,
-            },
-          },
-        });
-        if (!retry.result.ok) return this.asSummary(step.action, retry);
-        const retryData = retry.result.data as {
-          status: 'ANSWERED' | 'NEEDS_DEEP_REVIEW' | 'PAYWALL_REQUIRED';
-          answer?: MatchAskAnswer['answer'];
-        };
-        if (retryData.status !== 'ANSWERED') {
-          return {
-            ok: false,
-            summary: 'Unable to answer follow-up with current context',
-            error: 'Unable to answer follow-up with current context',
-            errorCode: 'CAPABILITY_FAILED',
-          };
-        }
-        state.followupAnswer = retryData.answer;
-        return {
-          ok: true,
-          summary: 'review.ask.match answered with deep review context',
-          data: retry.result.data,
-        };
-      }
-
       state.followupAnswer = data.answer;
       return {
         ok: true,
-        summary: 'review.ask.match answered with current match context',
+        summary: '基于当前对局上下文完成追问回答',
         data: asked.result.data,
       };
     }
@@ -643,7 +611,7 @@ export class CapabilityExecutor {
       if (!state.selectedMatchId) {
         return {
           ok: false,
-          summary: 'Missing match',
+          summary: '缺少目标对局',
           error: 'Missing matchId for prompts',
           errorCode: 'CONTEXT_INCOMPLETE',
           requiredInputs: ['match_id'],
@@ -664,7 +632,7 @@ export class CapabilityExecutor {
       if (!state.selectedMatchId) {
         return {
           ok: false,
-          summary: 'Missing match',
+          summary: '缺少目标对局',
           error: 'Missing matchId for clip upload',
           errorCode: 'CONTEXT_INCOMPLETE',
           requiredInputs: ['match_id'],
@@ -673,7 +641,7 @@ export class CapabilityExecutor {
       if (!uploadedClip) {
         return {
           ok: false,
-          summary: 'No clip uploaded',
+          summary: '未检测到上传视频',
           error: 'Clip review requires one uploaded short clip bound to current match',
           errorCode: 'CONTEXT_INCOMPLETE',
           requiredInputs: ['uploaded_clip'],
@@ -711,7 +679,7 @@ export class CapabilityExecutor {
       if (!state.selectedMatchId) {
         return {
           ok: false,
-          summary: 'Missing match',
+          summary: '缺少目标对局',
           error: 'Missing matchId for diagnosis create',
           errorCode: 'CONTEXT_INCOMPLETE',
           requiredInputs: ['match_id'],
@@ -761,7 +729,7 @@ export class CapabilityExecutor {
       if (!taskId) {
         return {
           ok: false,
-          summary: 'No diagnosis task id',
+          summary: '缺少诊断任务ID',
           error: 'diagnosis.video.create must run first',
           errorCode: 'CONTEXT_INCOMPLETE',
           requiredInputs: ['diagnosis_task_id'],
@@ -786,7 +754,7 @@ export class CapabilityExecutor {
       if (data.status === 'PENDING' || data.status === 'RUNNING') {
         return {
           ok: true,
-          summary: `Diagnosis task is ${data.status.toLowerCase()}, polling is required`,
+          summary: `视频诊断任务状态：${data.status}，需要继续轮询`,
           pending: {
             status: data.status,
             poll_hint_seconds: 5,
@@ -798,8 +766,8 @@ export class CapabilityExecutor {
       if (data.status === 'FAILED') {
         return {
           ok: false,
-          summary: data.error_message ?? 'Diagnosis task failed',
-          error: data.error_message ?? 'Diagnosis task failed',
+          summary: data.error_message ?? '视频诊断任务执行失败',
+          error: data.error_message ?? '视频诊断任务执行失败',
           errorCode: 'PROVIDER_RETRYABLE',
           retryable: true,
           data,
@@ -808,7 +776,7 @@ export class CapabilityExecutor {
 
       return {
         ok: true,
-        summary: 'diagnosis.video.status executed',
+        summary: '视频诊断状态检查完成',
         data,
       };
     }
@@ -818,7 +786,7 @@ export class CapabilityExecutor {
       if (!taskId) {
         return {
           ok: false,
-          summary: 'No diagnosis task id',
+          summary: '缺少诊断任务ID',
           error: 'diagnosis.video.create must run first',
           errorCode: 'CONTEXT_INCOMPLETE',
           requiredInputs: ['diagnosis_task_id'],
@@ -851,7 +819,7 @@ export class CapabilityExecutor {
           overall_judgement: data.render_payload.summary,
           likely_issue_types: [],
           key_moments: data.render_payload.key_moments,
-          positional_or_trade_error: data.structured_findings[0]?.insight ?? 'See structured findings',
+          positional_or_trade_error: data.structured_findings[0]?.insight ?? '请查看结构化诊断结果',
           execution_or_decision_hints: data.structured_findings.map((item) => item.advice),
           next_action_advice: data.recommended_next_questions,
           structured_findings: data.structured_findings,
@@ -866,20 +834,20 @@ export class CapabilityExecutor {
     }
 
     if (step.action === 'review.generate_deep') {
-      return { ok: true, summary: 'Legacy deep review alias skipped' };
+      return { ok: true, summary: '兼容旧版深度复盘别名：已跳过' };
     }
 
     if (step.action === 'review.ask_followup') {
-      return { ok: true, summary: 'Legacy follow-up alias skipped' };
+      return { ok: true, summary: '兼容旧版追问别名：已跳过' };
     }
 
     if (step.action === 'review.analyze_clip') {
-      return { ok: true, summary: 'Legacy clip alias skipped in favor of diagnosis.video.*' };
+      return { ok: true, summary: '兼容旧版视频分析别名：已跳过，改用 diagnosis.video.*' };
     }
 
     return {
       ok: false,
-      summary: 'Unknown step action',
+      summary: '未知步骤动作',
       error: `Unsupported action: ${step.action}`,
       errorCode: 'CAPABILITY_FAILED',
     };
@@ -913,7 +881,7 @@ export class CapabilityExecutor {
   private successRenderPayload(state: ExecutorState): AgentRenderPayload {
     return {
       state: 'SUCCESS',
-      display_message: 'Agent execution completed.',
+      display_message: '任务执行完成。',
       data: {
         report: state.report,
         deep_review: state.deepReview,
@@ -929,24 +897,26 @@ export class CapabilityExecutor {
       result: {
         ok: boolean;
         data?: unknown;
-        error?: { message: string; code?: string; retryable?: boolean };
+        error?: { message: string; details?: string; code?: string; retryable?: boolean };
       };
     }
   ): StepResult {
     if (response.result.ok) {
       return {
         ok: true,
-        summary: `${action} executed`,
+        summary: actionSummaryMap[action] ?? `${action} 执行完成`,
         data: response.result.data,
       };
     }
 
     const reason = this.mapError(action, response.result.error?.code, response.result.error?.retryable);
 
+    const detail = response.result.error?.details?.trim();
+    const mergedMessage = detail ? `${response.result.error?.message ?? '执行失败'} (${detail})` : (response.result.error?.message ?? '执行失败');
     return {
       ok: false,
-      summary: response.result.error?.message ?? 'Execution failed',
-      error: response.result.error?.message ?? 'Execution failed',
+      summary: mergedMessage,
+      error: mergedMessage,
       errorCode: reason,
       retryable: response.result.error?.retryable ?? false,
     };

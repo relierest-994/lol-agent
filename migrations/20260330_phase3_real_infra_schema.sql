@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS match_conversation_messages (
   match_id TEXT NOT NULL,
   role TEXT NOT NULL,
   content TEXT NOT NULL,
-  references JSONB NOT NULL,
+  ref JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL
 );
 

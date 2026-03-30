@@ -6,16 +6,21 @@ import { DiagnosisResultRenderer } from '../src/presentation/result-renderers/di
 
 describe('UI Shell Regression', () => {
   it('renders phase3 shell modules', () => {
-    const html = renderToStaticMarkup(<AppShell />);
+    const html = renderToStaticMarkup(
+      <AppShell
+        session={{ userId: 'test-user', displayName: '测试用户' }}
+        onLogout={() => undefined}
+      />
+    );
 
-    expect(html).toContain('Agent Chat Shell');
-    expect(html).toContain('Agent Task Status');
-    expect(html).toContain('Review Summary');
-    expect(html).toContain('Deep Review');
-    expect(html).toContain('Match Ask Panel');
-    expect(html).toContain('Video Upload Panel');
-    expect(html).toContain('Capability Gate');
-    expect(html).toContain('Entitlement Status');
+    expect(html).toContain('复盘对话');
+    expect(html).toContain('任务状态');
+    expect(html).toContain('基础复盘');
+    expect(html).toContain('深度复盘');
+    expect(html).toContain('对局追问');
+    expect(html).toContain('视频片段诊断');
+    expect(html).toContain('能力解锁状态');
+    expect(html).toContain('权益状态');
   });
 
   it('renders loading and failure views for realtime adaptation', () => {
@@ -34,9 +39,9 @@ describe('UI Shell Regression', () => {
       />
     );
 
-    expect(loadingHtml).toContain('Loading entitlement state');
+    expect(loadingHtml).toContain('正在加载权益状态');
     expect(errorHtml).toContain('provider timeout');
-    expect(diagnosisHtml).toContain('FAILED');
+    expect(diagnosisHtml).toContain('失败');
     expect(diagnosisHtml).toContain('provider unavailable');
   });
 });

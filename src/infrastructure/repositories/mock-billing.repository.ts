@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   EntitlementDecision,
   EntitlementFeature,
   EntitlementState,
@@ -13,6 +13,7 @@ import type {
   UserEntitlement,
 } from '../../domain';
 import { createPersistentStateStore, type PersistentStateStore } from '../persistence/persistent-state.store';
+import { loadRuntimeConfig } from '../config/runtime-config';
 
 interface CreateOrderInput {
   userId: string;
@@ -53,7 +54,17 @@ export interface EntitlementRepositorySnapshot {
   unlocks: UnlockRecord[];
 }
 
-const FREE_FEATURES: EntitlementFeature[] = ['BASIC_REVIEW', 'BASIC_GROWTH_SUMMARY'];
+const runtimeConfig = loadRuntimeConfig();
+const AI_FOLLOWUP_PAID = runtimeConfig.aiFollowupPaid;
+const CLIP_REVIEW_PAID = runtimeConfig.clipReviewPaid;
+
+const FREE_FEATURES: EntitlementFeature[] = [
+  'BASIC_REVIEW',
+  'BASIC_GROWTH_SUMMARY',
+  'DEEP_REVIEW',
+  ...(AI_FOLLOWUP_PAID ? [] : (['AI_FOLLOWUP'] as EntitlementFeature[])),
+  ...(CLIP_REVIEW_PAID ? [] : (['CLIP_REVIEW'] as EntitlementFeature[])),
+];
 
 function isExpired(nowIso: string, expiresAt?: string): boolean {
   if (!expiresAt) return false;
@@ -74,6 +85,23 @@ function firstFeature(plan: SubscriptionPlan): EntitlementFeature {
   const feature = plan.featureCodes[0];
   if (!feature) throw new Error(`Plan ${plan.planCode} has no feature code`);
   return feature;
+}
+
+function normalizeMapEntries<T>(input: unknown): Array<[string, T[]]> {
+  if (Array.isArray(input)) {
+    return input.filter((entry): entry is [string, T[]] => {
+      return Array.isArray(entry) && entry.length === 2 && typeof entry[0] === 'string' && Array.isArray(entry[1]);
+    });
+  }
+  if (input && typeof input === 'object') {
+    return Object.entries(input as Record<string, unknown>).map(([k, v]) => [k, Array.isArray(v) ? (v as T[]) : []]);
+  }
+  return [];
+}
+
+function normalizeStringArray(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return input.filter((item): item is string => typeof item === 'string');
 }
 
 const PLAN_SEED: SubscriptionPlan[] = [
@@ -169,21 +197,21 @@ const FEATURE_GATES: FeatureGate[] = [
     featureCode: 'DEEP_REVIEW',
     title: '深度复盘',
     description: '多维度拆解失误、节奏和决策质量',
-    isFree: false,
-    recommendedPlanCodes: ['PRO_MONTHLY', 'DEEP_SINGLE'],
+    isFree: true,
+    recommendedPlanCodes: [],
   },
   {
     featureCode: 'AI_FOLLOWUP',
     title: 'AI追问',
     description: '围绕报告继续发问，获得可执行建议',
-    isFree: false,
+    isFree: !AI_FOLLOWUP_PAID,
     recommendedPlanCodes: ['PRO_MONTHLY', 'FOLLOWUP_PACK_5'],
   },
   {
     featureCode: 'CLIP_REVIEW',
     title: '视频片段细节诊断',
     description: '针对关键片段进行逐镜头决策诊断',
-    isFree: false,
+    isFree: !CLIP_REVIEW_PAID,
     recommendedPlanCodes: ['PRO_MONTHLY', 'CLIP_PACK_3'],
   },
 ];
@@ -218,9 +246,9 @@ export class MockBillingRepository {
     const features: Record<EntitlementFeature, boolean> = {
       BASIC_REVIEW: true,
       BASIC_GROWTH_SUMMARY: true,
-      DEEP_REVIEW: false,
-      AI_FOLLOWUP: false,
-      CLIP_REVIEW: false,
+      DEEP_REVIEW: true,
+      AI_FOLLOWUP: !AI_FOLLOWUP_PAID,
+      CLIP_REVIEW: !CLIP_REVIEW_PAID,
     };
     const remainingQuota: Partial<Record<EntitlementFeature, number>> = {};
 
@@ -632,12 +660,12 @@ export class MockBillingRepository {
 
   private hydrate(): void {
     const state = this.store.read<{
-      userEntitlements: Array<[string, UserEntitlement[]]>;
-      quotas: Array<[string, UsageQuota[]]>;
-      orders: Array<[string, PurchaseOrder[]]>;
-      payments: Array<[string, PaymentRecord[]]>;
-      unlocks: Array<[string, UnlockRecord[]]>;
-      usageLedger: string[];
+      userEntitlements?: unknown;
+      quotas?: unknown;
+      orders?: unknown;
+      payments?: unknown;
+      unlocks?: unknown;
+      usageLedger?: unknown;
     }>('state');
     if (!state) return;
     this.userEntitlements.clear();
@@ -646,12 +674,12 @@ export class MockBillingRepository {
     this.payments.clear();
     this.unlocks.clear();
     this.usageLedger.clear();
-    for (const [k, v] of state.userEntitlements) this.userEntitlements.set(k, v);
-    for (const [k, v] of state.quotas) this.quotas.set(k, v);
-    for (const [k, v] of state.orders) this.orders.set(k, v);
-    for (const [k, v] of state.payments) this.payments.set(k, v);
-    for (const [k, v] of state.unlocks) this.unlocks.set(k, v);
-    for (const key of state.usageLedger) this.usageLedger.add(key);
+    for (const [k, v] of normalizeMapEntries<UserEntitlement>(state.userEntitlements)) this.userEntitlements.set(k, v);
+    for (const [k, v] of normalizeMapEntries<UsageQuota>(state.quotas)) this.quotas.set(k, v);
+    for (const [k, v] of normalizeMapEntries<PurchaseOrder>(state.orders)) this.orders.set(k, v);
+    for (const [k, v] of normalizeMapEntries<PaymentRecord>(state.payments)) this.payments.set(k, v);
+    for (const [k, v] of normalizeMapEntries<UnlockRecord>(state.unlocks)) this.unlocks.set(k, v);
+    for (const key of normalizeStringArray(state.usageLedger)) this.usageLedger.add(key);
   }
 
   private persist(): void {

@@ -28,8 +28,9 @@ export interface ReviewGenerateBasicOutput {
   nextSuggestionsTop3: string[];
 }
 
-function linesOf(report: import('../../../domain').BasicReviewReport, title: string): string[] {
-  return report.sections.find((item) => item.title === title)?.lines ?? [];
+function countEarlyDeaths(timeline: import('../../../domain').MatchTimeline | undefined): number {
+  if (!timeline) return 0;
+  return timeline.events.filter((event) => event.type === 'DEATH' && event.minute <= 10).length;
 }
 
 const dimensionEnum: DeepReviewDimension[] = [
@@ -99,29 +100,40 @@ export const reviewGenerateBasicCapability: CapabilityDefinition<
     if (!input.accountId || !input.matchId) return invalidInput('accountId and matchId are required');
 
     try {
-      const detail = await provider.getMatchDetail(input.region, input.matchId);
+      const [detail, timeline] = await Promise.all([
+        provider.getMatchDetail(input.region, input.matchId),
+        provider.getMatchTimeline(input.region, input.matchId),
+      ]);
       if (!detail) return notFound(`Match not found: ${input.matchId}`);
 
-      const report = await provider.generateBasicReview(detail, context.nowIso);
-      const kda = ((detail.kills + detail.assists) / Math.max(detail.deaths, 1)).toFixed(2);
+      const enrichedDetail: import('../../../domain').MatchDetail = {
+        ...detail,
+        timelineSignals: {
+          ...detail.timelineSignals,
+          earlyDeaths: countEarlyDeaths(timeline),
+        },
+      };
+
+      const report = await provider.generateBasicReview(enrichedDetail, context.nowIso);
+      const kda = ((enrichedDetail.kills + enrichedDetail.assists) / Math.max(enrichedDetail.deaths, 1)).toFixed(2);
 
       return {
         ok: true,
         data: {
           report,
           matchSummary: {
-            matchId: detail.matchId,
-            championName: detail.championName,
-            queue: detail.queue,
-            outcome: detail.outcome,
+            matchId: enrichedDetail.matchId,
+            championName: enrichedDetail.championName,
+            queue: enrichedDetail.queue,
+            outcome: enrichedDetail.outcome,
             kda,
-            durationMinutes: detail.durationMinutes,
-            playedAt: detail.playedAt,
+            durationMinutes: enrichedDetail.durationMinutes,
+            playedAt: enrichedDetail.playedAt,
           },
-          winLossKeyFactors: linesOf(report, '输赢关键点'),
-          issuesTop3: linesOf(report, '玩家问题 Top 3').slice(0, 3),
-          highlightsTop3: linesOf(report, '玩家亮点 Top 3').slice(0, 3),
-          nextSuggestionsTop3: linesOf(report, '下局建议 Top 3').slice(0, 3),
+          winLossKeyFactors: report.sections[1]?.lines ?? [],
+          issuesTop3: report.sections[2]?.lines.slice(0, 3) ?? [],
+          highlightsTop3: report.sections[3]?.lines.slice(0, 3) ?? [],
+          nextSuggestionsTop3: report.sections[4]?.lines.slice(0, 3) ?? [],
         },
       };
     } catch (error) {
@@ -181,9 +193,8 @@ export const reviewDeepGenerateCapability: CapabilityDefinition<
   },
   errorSchema: STANDARD_ERROR_SCHEMA,
   entitlement: {
-    required: true,
-    feature: 'DEEP_REVIEW',
-    description: 'Deep review is paid',
+    required: false,
+    description: 'Deep review is included in base review experience',
   },
   async invoke(context, input, provider) {
     if (context.userId !== input.user_id) return unauthorized('user_id does not match authenticated context');
@@ -203,11 +214,6 @@ export const reviewDeepGenerateCapability: CapabilityDefinition<
     }
 
     try {
-      const decision = await provider.checkFeatureAccess(input.user_id, 'DEEP_REVIEW', context.nowIso);
-      if (!decision.can_access) {
-        return entitlementRequired(decision.display_message, decision.reason_code);
-      }
-
       const deep = await provider.generateDeepReview({
         userId: input.user_id,
         region: input.region,
@@ -421,7 +427,7 @@ export const reviewAskMatchCapability: CapabilityDefinition<
               display_message: askDecision.display_message,
               paywall_payload: askDecision.paywall_payload,
             },
-            suggested_prompts: ['解锁 AI追问后，我可以围绕本局具体时间点继续追问。'],
+            suggested_prompts: ['解锁 AI 追问后，可继续按时间点细化分析。'],
           },
         };
       }
@@ -433,26 +439,6 @@ export const reviewAskMatchCapability: CapabilityDefinition<
         question: input.question,
         nowIso: context.nowIso,
       });
-
-      if (answer.status === 'NEEDS_DEEP_REVIEW') {
-        const deepDecision = await provider.checkFeatureAccess(input.user_id, 'DEEP_REVIEW', context.nowIso);
-        if (!deepDecision.can_access) {
-          return {
-            ok: true,
-            data: {
-              status: 'PAYWALL_REQUIRED',
-              cited_from: answer.cited_from,
-              paywall_action: {
-                feature_code: 'DEEP_REVIEW',
-                reason_code: deepDecision.reason_code,
-                display_message: '该问题依赖深度复盘，请先解锁深度复盘能力',
-                paywall_payload: deepDecision.paywall_payload,
-              },
-              suggested_prompts: answer.suggested_prompts,
-            },
-          };
-        }
-      }
 
       return {
         ok: true,
@@ -631,7 +617,7 @@ export const reviewAnalyzeClipCapability: CapabilityDefinition<
       data: {
         status: 'LOCKED',
         feature_code: 'CLIP_REVIEW',
-        message: '视频片段细节诊断将在下一阶段增强',
+        message: '闂備浇宕甸崰鎰版偡閵夈儙娑樷攽鐎ｃ劉鍋撻崒鐐查唶闁哄洨鍠庢禍閬嶆⒑閹肩偛鍔撮柣鎾崇墦瀹曨剟鎮惧畝鈧壕钘壝归敐鍛暈妞ゃ儮鈧枼鏀介柍钘夋楠炴﹢鏌熸搴⌒ｇ紒缁樼箞瀹曟﹢鍩￠崘銊バㄩ梻浣筋嚙缁绘劗鎹㈤幇顑╂稑螖閳ь剟鏁冮姀銈庢晜闁告侗鍨弸鏍煟鎼搭垳宀涢柡鍛箞椤㈡棃鏌嗗鍡忔嫽闂佸憡鍔﹂崢濂告偂閹邦厹浜滈柡鍌涘濠€浼存煛閸涱厾鍩ｉ柟顔界懇楠炴捇骞掗弮鍌滄殺',
       },
     };
   },

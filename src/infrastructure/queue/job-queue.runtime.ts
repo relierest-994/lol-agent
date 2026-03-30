@@ -38,6 +38,35 @@ function backoffMs(attempt: number): number {
   return Math.min(30_000, 1000 * Math.max(1, attempt));
 }
 
+function isQueueJobRecord(input: unknown): input is QueueJobRecord {
+  if (!input || typeof input !== 'object') return false;
+  const job = input as Partial<QueueJobRecord>;
+  return (
+    typeof job.job_id === 'string' &&
+    typeof job.queue_name === 'string' &&
+    typeof job.job_type === 'string' &&
+    typeof job.status === 'string' &&
+    typeof job.attempts === 'number' &&
+    typeof job.max_attempts === 'number' &&
+    typeof job.next_run_at === 'string' &&
+    typeof job.created_at === 'string' &&
+    typeof job.updated_at === 'string'
+  );
+}
+
+function normalizeJobs(input: unknown): QueueJobRecord[] {
+  if (Array.isArray(input)) {
+    return input.filter(isQueueJobRecord);
+  }
+
+  // Backward compatibility: some historical states may store jobs as object-map.
+  if (input && typeof input === 'object') {
+    return Object.values(input as Record<string, unknown>).filter(isQueueJobRecord);
+  }
+
+  return [];
+}
+
 class LocalJobQueueRuntime {
   private readonly store = createPersistentStateStore('job-queue-runtime');
   private readonly handlers = new Map<string, QueueJobHandler>();
@@ -151,10 +180,17 @@ class LocalJobQueueRuntime {
   }
 
   private hydrate(): void {
-    const state = this.store.read<QueueRuntimeState>('state');
+    const state = this.store.read<QueueRuntimeState | { jobs?: unknown }>('state');
     if (!state) return;
     this.jobs.clear();
-    for (const job of state.jobs) this.jobs.set(job.job_id, job);
+    const jobs = normalizeJobs(state.jobs);
+    for (const job of jobs) this.jobs.set(job.job_id, job);
+    if (jobs.length === 0 && state.jobs !== undefined) {
+      logger.warn('Queue runtime state was invalid, reset to empty state', {
+        component: 'local-job-queue',
+      });
+      this.persist();
+    }
   }
 
   private persist(): void {

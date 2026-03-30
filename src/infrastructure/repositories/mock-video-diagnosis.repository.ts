@@ -17,6 +17,18 @@ function key(userId: string, matchId: string): string {
   return `${userId}:${matchId}`;
 }
 
+function normalizeMapEntries<T>(input: unknown): Array<[string, T]> {
+  if (Array.isArray(input)) {
+    return input.filter((entry): entry is [string, T] => {
+      return Array.isArray(entry) && entry.length === 2 && typeof entry[0] === 'string';
+    });
+  }
+  if (input && typeof input === 'object') {
+    return Object.entries(input as Record<string, unknown>) as Array<[string, T]>;
+  }
+  return [];
+}
+
 export class MockVideoDiagnosisRepository {
   private readonly assets = new Map<string, VideoClipAsset>();
   private readonly tasks = new Map<string, VideoDiagnosisTask>();
@@ -175,13 +187,13 @@ export class MockVideoDiagnosisRepository {
 
   private hydrate(): void {
     const state = this.store.read<{
-      assets: Array<[string, VideoClipAsset]>;
-      tasks: Array<[string, VideoDiagnosisTask]>;
-      results: Array<[string, VideoDiagnosisResult]>;
-      latestTaskByUserMatch: Array<[string, string]>;
-      latestResultByUserMatch: Array<[string, string]>;
-      contexts: Array<[string, MultimodalInputContext]>;
-      jobsByAsset: Array<[string, AssetProcessingJob[]]>;
+      assets?: unknown;
+      tasks?: unknown;
+      results?: unknown;
+      latestTaskByUserMatch?: unknown;
+      latestResultByUserMatch?: unknown;
+      contexts?: unknown;
+      jobsByAsset?: unknown;
     }>('state');
     if (!state) return;
     this.assets.clear();
@@ -191,13 +203,14 @@ export class MockVideoDiagnosisRepository {
     this.latestResultByUserMatch.clear();
     this.contexts.clear();
     this.jobsByAsset.clear();
-    for (const [k, v] of state.assets) this.assets.set(k, v);
-    for (const [k, v] of state.tasks) this.tasks.set(k, v);
-    for (const [k, v] of state.results) this.results.set(k, v);
-    for (const [k, v] of state.latestTaskByUserMatch) this.latestTaskByUserMatch.set(k, v);
-    for (const [k, v] of state.latestResultByUserMatch) this.latestResultByUserMatch.set(k, v);
-    for (const [k, v] of state.contexts) this.contexts.set(k, v);
-    for (const [k, v] of state.jobsByAsset) this.jobsByAsset.set(k, v);
+    for (const [k, v] of normalizeMapEntries<VideoClipAsset>(state.assets)) this.assets.set(k, v);
+    for (const [k, v] of normalizeMapEntries<VideoDiagnosisTask>(state.tasks)) this.tasks.set(k, v);
+    for (const [k, v] of normalizeMapEntries<VideoDiagnosisResult>(state.results)) this.results.set(k, v);
+    for (const [k, v] of normalizeMapEntries<string>(state.latestTaskByUserMatch)) this.latestTaskByUserMatch.set(k, v);
+    for (const [k, v] of normalizeMapEntries<string>(state.latestResultByUserMatch))
+      this.latestResultByUserMatch.set(k, v);
+    for (const [k, v] of normalizeMapEntries<MultimodalInputContext>(state.contexts)) this.contexts.set(k, v);
+    for (const [k, v] of normalizeMapEntries<AssetProcessingJob[]>(state.jobsByAsset)) this.jobsByAsset.set(k, v);
   }
 
   private persist(): void {

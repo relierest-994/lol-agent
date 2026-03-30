@@ -1,13 +1,14 @@
 import type { EntitlementFeature, EntitlementState } from '../../domain';
 import { CapabilityGateCard } from './capability-gate-card';
 
-const FEATURE_ORDER: EntitlementFeature[] = ['DEEP_REVIEW', 'AI_FOLLOWUP', 'CLIP_REVIEW'];
+const FEATURE_ORDER: EntitlementFeature[] = ['AI_FOLLOWUP', 'CLIP_REVIEW'];
+
 const FEATURE_FALLBACK: Record<EntitlementFeature, { title: string; description: string }> = {
-  BASIC_REVIEW: { title: 'Basic Match Review', description: 'Free baseline review output' },
-  BASIC_GROWTH_SUMMARY: { title: 'Basic Growth Summary', description: 'Free growth summary output' },
-  DEEP_REVIEW: { title: 'Deep Review', description: 'Dimension-level diagnosis and coaching suggestions' },
-  AI_FOLLOWUP: { title: 'AI Follow-up', description: 'Ask context-bound questions around this match' },
-  CLIP_REVIEW: { title: 'Video Clip Diagnosis', description: 'Short clip detail diagnosis for this match context' },
+  BASIC_REVIEW: { title: '基础复盘', description: '免费能力，输出完整复盘结果' },
+  BASIC_GROWTH_SUMMARY: { title: '基础成长摘要', description: '免费能力，输出阶段性成长方向' },
+  DEEP_REVIEW: { title: '深度复盘', description: '已并入基础复盘，不单独收费' },
+  AI_FOLLOWUP: { title: 'AI 追问', description: '基于当前对局上下文继续追问' },
+  CLIP_REVIEW: { title: '视频片段诊断', description: '上传短视频片段进行细节诊断' },
 };
 
 interface EntitlementGateProps {
@@ -19,7 +20,7 @@ export function EntitlementGate({ entitlement }: EntitlementGateProps) {
 
   return (
     <section className="panel">
-      <h2>Capability Gate</h2>
+      <h2>能力解锁状态</h2>
       <div className="gate-grid">
         {FEATURE_ORDER.map((featureCode) => {
           const gate = gates.find((item) => item.featureCode === featureCode);

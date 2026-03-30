@@ -69,3 +69,4 @@ export function clearPersistentState(scope: string): void {
   const store = createPersistentStateStore(scope);
   store.remove('state');
 }
+

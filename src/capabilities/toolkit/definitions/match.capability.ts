@@ -50,7 +50,14 @@ export const matchListRecentCapability: CapabilityDefinition<MatchListRecentInpu
         },
       };
     } catch (error) {
-      return providerError('Failed to list recent matches', error instanceof Error ? error.message : 'Unknown');
+      const detail = error instanceof Error ? error.message : 'Unknown';
+      if (/Riot API 403/i.test(detail)) {
+        return providerError('拉取最近对局失败：Riot 鉴权失败', detail);
+      }
+      if (/Riot API 429/i.test(detail)) {
+        return providerError('拉取最近对局失败：Riot 接口限流', detail);
+      }
+      return providerError('Failed to list recent matches', detail);
     }
   },
 };

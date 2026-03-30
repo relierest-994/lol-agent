@@ -6,7 +6,7 @@ describe('RealCapabilityProvider fallback', () => {
     const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
     if (!env) return;
     const backup = { ...env };
-    env.APP_PROVIDER_MODE = 'real';
+    env.VITE_APP_PROVIDER_MODE = 'real';
     env.APP_ALLOW_MOCK_FALLBACK = 'true';
     env.API_BASE_URL = 'http://127.0.0.1:1';
     env.LLM_API_URL = 'http://127.0.0.1:1';
