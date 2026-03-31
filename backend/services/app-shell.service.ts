@@ -120,12 +120,13 @@ interface DataDragonChampion {
   key: string;
   name: string;
   title: string;
-  lore: string;
+  lore?: string;
+  blurb?: string;
   tags: string[];
   image: DataDragonImage;
   stats: DataDragonStats;
-  passive: DataDragonPassive;
-  spells: DataDragonSpell[];
+  passive?: DataDragonPassive;
+  spells?: DataDragonSpell[];
 }
 
 interface DataDragonChampionsPayload {
@@ -138,6 +139,21 @@ function createInitialState(): AppShellState {
     phoneToUserId: {},
     loginCodesByPhone: {},
     sessions: {},
+  };
+}
+
+function asRecord(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+  return input as Record<string, unknown>;
+}
+
+function normalizeState(input: unknown): AppShellState {
+  const raw = asRecord(input);
+  return {
+    usersById: asRecord(raw.usersById) as Record<string, AppUserRecord>,
+    phoneToUserId: asRecord(raw.phoneToUserId) as Record<string, string>,
+    loginCodesByPhone: asRecord(raw.loginCodesByPhone) as Record<string, AppLoginCodeRecord>,
+    sessions: asRecord(raw.sessions) as Record<string, { userId: string; createdAt: string }>,
   };
 }
 
@@ -167,6 +183,21 @@ function safeSqlString(value: string): string {
 function safeSqlNullable(value: string | undefined): string {
   if (value === undefined) return 'NULL';
   return safeSqlString(value);
+}
+
+function quoteIdentifier(identifier: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
+    throw new Error(`Invalid SQL identifier: ${identifier}`);
+  }
+  return `"${identifier}"`;
+}
+
+function getDbSchema(): string {
+  return process.env.APP_DB_SCHEMA?.trim() || 'public';
+}
+
+function appShellTable(tableName: string): string {
+  return `${quoteIdentifier(getDbSchema())}.${quoteIdentifier(tableName)}`;
 }
 
 function parseJsonRows<T>(raw: string): T[] {
@@ -240,6 +271,7 @@ export class AppShellService {
   private readonly store = createPersistentStateStore('app-shell-v2');
   private readonly dbModeEnabled: boolean;
   private dbWriteAvailable = true;
+  private dbTablesReady = false;
   private heroCache?: {
     cachedAt: number;
     version: string;
@@ -254,18 +286,67 @@ export class AppShellService {
   }
 
   private readState(): AppShellState {
-    return this.store.read<AppShellState>('state') ?? createInitialState();
+    const raw = this.store.read<unknown>('state');
+    if (!raw) return createInitialState();
+    return normalizeState(raw);
   }
 
   private writeState(state: AppShellState): void {
-    this.store.write('state', state);
+    this.store.write('state', normalizeState(state));
+  }
+
+  private ensureAppShellTables(): void {
+    if (!this.dbModeEnabled || !this.dbWriteAvailable || this.dbTablesReady) return;
+    execPsql(`
+      CREATE TABLE IF NOT EXISTS ${appShellTable('app_users')} (
+        user_id TEXT PRIMARY KEY,
+        phone TEXT NOT NULL UNIQUE,
+        nickname TEXT,
+        avatar_url TEXT NOT NULL,
+        profile_completed BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL,
+        last_login_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS ${appShellTable('app_login_codes')} (
+        request_id TEXT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        verification_code TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        consumed BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS ${appShellTable('app_user_sessions')} (
+        session_token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS ${appShellTable('app_user_game_accounts')} (
+        user_id TEXT NOT NULL,
+        region TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        game_name TEXT NOT NULL,
+        tag_line TEXT NOT NULL,
+        last_synced_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL,
+        PRIMARY KEY (user_id, region)
+      );
+    `);
+    this.dbTablesReady = true;
   }
 
   private persistUserToDb(user: AppUserRecord): void {
     if (!this.dbModeEnabled || !this.dbWriteAvailable) return;
     try {
+      this.ensureAppShellTables();
       execPsql(`
-        INSERT INTO app_users (
+        INSERT INTO ${appShellTable('app_users')} (
           user_id,
           phone,
           nickname,
@@ -299,8 +380,9 @@ export class AppShellService {
   private persistCodeToDb(code: AppLoginCodeRecord): void {
     if (!this.dbModeEnabled || !this.dbWriteAvailable) return;
     try {
+      this.ensureAppShellTables();
       execPsql(`
-        INSERT INTO app_login_codes (
+        INSERT INTO ${appShellTable('app_login_codes')} (
           request_id,
           phone,
           verification_code,
@@ -330,8 +412,9 @@ export class AppShellService {
   private persistSessionToDb(sessionToken: string, userId: string, createdAt: string): void {
     if (!this.dbModeEnabled || !this.dbWriteAvailable) return;
     try {
+      this.ensureAppShellTables();
       execPsql(`
-        INSERT INTO app_user_sessions (
+        INSERT INTO ${appShellTable('app_user_sessions')} (
           session_token,
           user_id,
           created_at,
@@ -362,8 +445,9 @@ export class AppShellService {
   }): void {
     if (!this.dbModeEnabled || !this.dbWriteAvailable) return;
     try {
+      this.ensureAppShellTables();
       execPsql(`
-        INSERT INTO app_user_game_accounts (
+        INSERT INTO ${appShellTable('app_user_game_accounts')} (
           user_id,
           region,
           account_id,
@@ -655,13 +739,17 @@ export class AppShellService {
     const previous = snapshot.previousChampions[champion.id];
     const change = inferChampionChangeTag(champion, previous);
     const avatarUrl = `https://ddragon.leagueoflegends.com/cdn/${snapshot.version}/img/champion/${champion.image.full}`;
+    const passiveRaw = champion.passive;
     const passive: HeroSpellDetail = {
       id: `${champion.id}-passive`,
-      name: champion.passive.name,
-      description: champion.passive.description,
-      iconUrl: `https://ddragon.leagueoflegends.com/cdn/${snapshot.version}/img/passive/${champion.passive.image.full}`,
+      name: passiveRaw?.name ?? '被动技能',
+      description: passiveRaw?.description ?? '暂无被动技能说明',
+      iconUrl: passiveRaw?.image?.full
+        ? `https://ddragon.leagueoflegends.com/cdn/${snapshot.version}/img/passive/${passiveRaw.image.full}`
+        : avatarUrl,
     };
-    const spells: HeroSpellDetail[] = champion.spells.map((item) => ({
+    const spellsRaw = Array.isArray(champion.spells) ? champion.spells : [];
+    const spells: HeroSpellDetail[] = spellsRaw.map((item) => ({
       id: item.id,
       name: item.name,
       description: item.description,
@@ -675,7 +763,7 @@ export class AppShellService {
         championId: champion.id,
         name: champion.name,
         title: champion.title,
-        lore: champion.lore,
+        lore: champion.lore ?? champion.blurb ?? '暂无英雄背景故事',
         avatarUrl,
         positions: mapTagsToPositions(champion.tags),
         latestChangeTag: change.tag,
@@ -747,6 +835,7 @@ export class AppShellService {
   async seedFromDb(): Promise<void> {
     if (!this.dbModeEnabled || !this.dbWriteAvailable) return;
     try {
+      this.ensureAppShellTables();
       const userRows = parseJsonRows<{
         user_id: string;
         phone: string;
@@ -758,7 +847,7 @@ export class AppShellService {
       }>(
         execPsql(`
           SELECT user_id, phone, nickname, avatar_url, profile_completed, created_at::text, last_login_at::text
-          FROM app_users;
+          FROM ${appShellTable('app_users')};
         `)
       );
 

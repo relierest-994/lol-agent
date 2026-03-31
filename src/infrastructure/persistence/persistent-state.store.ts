@@ -5,24 +5,54 @@ export interface PersistentStateStore {
 }
 
 class BrowserLocalStorageStore implements PersistentStateStore {
-  constructor(private readonly namespace: string) {}
+  private readonly runtimeFallback: Map<string, string>;
+
+  constructor(private readonly namespace: string) {
+    const runtime = globalThis as { __LOL_AGENT_PERSISTENT_STORE__?: Map<string, string> };
+    if (!runtime.__LOL_AGENT_PERSISTENT_STORE__) runtime.__LOL_AGENT_PERSISTENT_STORE__ = new Map<string, string>();
+    this.runtimeFallback = runtime.__LOL_AGENT_PERSISTENT_STORE__;
+  }
 
   read<T>(key: string): T | undefined {
+    const scopedKey = `${this.namespace}:${key}`;
     try {
-      const raw = globalThis.localStorage?.getItem(`${this.namespace}:${key}`);
-      if (!raw) return undefined;
+      const raw = globalThis.localStorage?.getItem(scopedKey);
+      if (!raw) {
+        const fallbackRaw = this.runtimeFallback.get(scopedKey);
+        if (!fallbackRaw) return undefined;
+        return JSON.parse(fallbackRaw) as T;
+      }
       return JSON.parse(raw) as T;
     } catch {
-      return undefined;
+      try {
+        const fallbackRaw = this.runtimeFallback.get(scopedKey);
+        if (!fallbackRaw) return undefined;
+        return JSON.parse(fallbackRaw) as T;
+      } catch {
+        return undefined;
+      }
     }
   }
 
   write<T>(key: string, value: T): void {
-    globalThis.localStorage?.setItem(`${this.namespace}:${key}`, JSON.stringify(value));
+    const scopedKey = `${this.namespace}:${key}`;
+    const serialized = JSON.stringify(value);
+    this.runtimeFallback.set(scopedKey, serialized);
+    try {
+      globalThis.localStorage?.setItem(scopedKey, serialized);
+    } catch {
+      // keep runtime fallback when persistent backend is temporarily unavailable
+    }
   }
 
   remove(key: string): void {
-    globalThis.localStorage?.removeItem(`${this.namespace}:${key}`);
+    const scopedKey = `${this.namespace}:${key}`;
+    this.runtimeFallback.delete(scopedKey);
+    try {
+      globalThis.localStorage?.removeItem(scopedKey);
+    } catch {
+      // ignore persistent backend removal errors
+    }
   }
 }
 
@@ -69,4 +99,3 @@ export function clearPersistentState(scope: string): void {
   const store = createPersistentStateStore(scope);
   store.remove('state');
 }
-

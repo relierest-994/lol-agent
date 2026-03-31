@@ -1,7 +1,9 @@
-﻿import * as DocumentPicker from 'expo-document-picker';
+﻿import 'react-native-gesture-handler';
+import * as DocumentPicker from 'expo-document-picker';
 import { StatusBar } from 'expo-status-bar';
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   ActivityIndicator,
   Alert,
@@ -15,6 +17,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
   getHeroDetailUseCase,
   getHeroesUseCase,
@@ -139,8 +142,8 @@ function LoginPage(props: { onLogin: (session: AppUserSession) => void }): React
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="dark" />
-      <View style={styles.bgDecorTop} />
-      <View style={styles.bgDecorBottom} />
+      <View style={styles.bgDecorTop} pointerEvents="none" />
+      <View style={styles.bgDecorBottom} pointerEvents="none" />
 
       <View style={styles.loginHero}>
         <Text style={styles.heroTag}>{APP_NAME}</Text>
@@ -277,32 +280,12 @@ function MatchRow(props: {
   );
 }
 
-function BottomTabs(props: { tab: MainTab; onChange: (tab: MainTab) => void }): React.ReactElement {
-  return (
-    <View style={styles.bottomTabs}>
-      <Pressable style={styles.bottomTabItem} onPress={() => props.onChange('HOME')}>
-        <Text style={[styles.bottomTabText, props.tab === 'HOME' ? styles.bottomTabTextActive : undefined]}>首页</Text>
-      </Pressable>
-      <Pressable style={styles.bottomTabItem} onPress={() => props.onChange('HEROES')}>
-        <Text style={[styles.bottomTabText, props.tab === 'HEROES' ? styles.bottomTabTextActive : undefined]}>英雄</Text>
-      </Pressable>
-      <Pressable style={styles.bottomTabItem} onPress={() => props.onChange('DATA_CENTER')}>
-        <Text style={[styles.bottomTabText, props.tab === 'DATA_CENTER' ? styles.bottomTabTextActive : undefined]}>数据中心</Text>
-      </Pressable>
-      <Pressable style={styles.bottomTabItem} onPress={() => props.onChange('MINE')}>
-        <Text style={[styles.bottomTabText, props.tab === 'MINE' ? styles.bottomTabTextActive : undefined]}>我的</Text>
-      </Pressable>
-    </View>
-  );
-}
-
 function AppInner(props: {
   session: AppUserSession;
   onLogout: () => void;
 }): React.ReactElement {
   const vm = useAgentShell(props.session.userId);
   const runtimeConfig = useMemo(() => loadRuntimeConfig(), []);
-
   const [mainTab, setMainTab] = useState<MainTab>('HOME');
   const [overlayPage, setOverlayPage] = useState<OverlayPage>('MAIN');
   const [bindModalVisible, setBindModalVisible] = useState(false);
@@ -659,8 +642,8 @@ function AppInner(props: {
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="dark" />
-      <View style={styles.bgDecorTop} />
-      <View style={styles.bgDecorBottom} />
+      <View style={styles.bgDecorTop} pointerEvents="none" />
+      <View style={styles.bgDecorBottom} pointerEvents="none" />
 
       <Modal visible={bindModalVisible} transparent animationType="fade">
         <View style={styles.modalMask}>
@@ -712,13 +695,31 @@ function AppInner(props: {
       </Modal>
 
       {overlayPage === 'MAIN' ? (
-        <>
-          {mainTab === 'HOME' ? renderHome() : null}
-          {mainTab === 'HEROES' ? renderHeroes() : null}
-          {mainTab === 'DATA_CENTER' ? renderDataCenter() : null}
-          {mainTab === 'MINE' ? renderMine() : null}
-          <BottomTabs tab={mainTab} onChange={setMainTab} />
-        </>
+        <View style={styles.mainLayout}>
+          <View style={styles.mainPane}>
+            <View style={styles.topTabs}>
+              <Pressable style={[styles.topTabBtn, mainTab === 'HOME' ? styles.topTabBtnActive : undefined]} onPress={() => setMainTab('HOME')}>
+                <Text style={[styles.topTabText, mainTab === 'HOME' ? styles.topTabTextActive : undefined]}>首页</Text>
+              </Pressable>
+              <Pressable style={[styles.topTabBtn, mainTab === 'HEROES' ? styles.topTabBtnActive : undefined]} onPress={() => setMainTab('HEROES')}>
+                <Text style={[styles.topTabText, mainTab === 'HEROES' ? styles.topTabTextActive : undefined]}>英雄</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.topTabBtn, mainTab === 'DATA_CENTER' ? styles.topTabBtnActive : undefined]}
+                onPress={() => setMainTab('DATA_CENTER')}
+              >
+                <Text style={[styles.topTabText, mainTab === 'DATA_CENTER' ? styles.topTabTextActive : undefined]}>数据中心</Text>
+              </Pressable>
+              <Pressable style={[styles.topTabBtn, mainTab === 'MINE' ? styles.topTabBtnActive : undefined]} onPress={() => setMainTab('MINE')}>
+                <Text style={[styles.topTabText, mainTab === 'MINE' ? styles.topTabTextActive : undefined]}>我的</Text>
+              </Pressable>
+            </View>
+            {mainTab === 'HOME' ? renderHome() : null}
+            {mainTab === 'HEROES' ? renderHeroes() : null}
+            {mainTab === 'DATA_CENTER' ? renderDataCenter() : null}
+            {mainTab === 'MINE' ? renderMine() : null}
+          </View>
+        </View>
       ) : null}
 
       {overlayPage === 'REVIEW' ? (
@@ -812,31 +813,31 @@ export default function App(): React.ReactElement {
     setProfileModalVisible(false);
   }
 
-  if (splashVisible) {
-    return <SplashScreen />;
-  }
-
-  if (!session) {
-    return <LoginPage onLogin={setSession} />;
-  }
-
   return (
-    <>
-      <AppInner session={session} onLogout={() => setSession(undefined)} />
-      <ProfileSetupModal
-        visible={profileModalVisible}
-        currentProfile={{
-          userId: session.userId,
-          phone: session.phone,
-          nickname: session.nickname,
-          avatarUrl: session.avatarUrl,
-          profileCompleted: session.profileCompleted,
-          createdAt: new Date().toISOString(),
-          lastLoginAt: new Date().toISOString(),
-        }}
-        onDone={handleProfileDone}
-      />
-    </>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        {splashVisible ? <SplashScreen /> : null}
+        {!splashVisible && !session ? <LoginPage onLogin={setSession} /> : null}
+        {!splashVisible && session ? (
+          <>
+            <AppInner session={session} onLogout={() => setSession(undefined)} />
+            <ProfileSetupModal
+              visible={profileModalVisible}
+              currentProfile={{
+                userId: session.userId,
+                phone: session.phone,
+                nickname: session.nickname,
+                avatarUrl: session.avatarUrl,
+                profileCompleted: session.profileCompleted,
+                createdAt: new Date().toISOString(),
+                lastLoginAt: new Date().toISOString(),
+              }}
+              onDone={handleProfileDone}
+            />
+          </>
+        ) : null}
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -1035,11 +1036,40 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   loadingText: { color: '#36518A', fontSize: 13, fontWeight: '600' },
+  mainLayout: { flex: 1 },
+  mainPane: { flex: 1 },
+  topTabs: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#CEDCFF',
+    backgroundColor: '#FFFFFF',
+    padding: 6,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  topTabBtn: {
+    flex: 1,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    backgroundColor: '#F3F7FF',
+  },
+  topTabBtnActive: {
+    backgroundColor: '#2F5FDB',
+  },
+  topTabText: {
+    color: '#4F6696',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  topTabTextActive: {
+    color: '#FFFFFF',
+  },
   bottomTabs: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     borderTopWidth: 1,
     borderTopColor: '#D5E1FF',
     backgroundColor: '#FFFFFF',

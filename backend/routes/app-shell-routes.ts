@@ -26,6 +26,12 @@ function mapError(error: unknown): { status: number; code: string; message: stri
   if (message === 'HERO_NOT_FOUND') {
     return { status: 404, code: message, message: '未找到该英雄，请刷新后重试。' };
   }
+  if (/schema .* does not exist|不存在|relation .* does not exist|未找到关系/i.test(message)) {
+    return { status: 503, code: 'DB_SCHEMA_MISSING', message: '数据库 schema 或数据表不存在，请先建库建表。' };
+  }
+  if (/DB query failed|persistent_state_kv|permission denied|insufficient privilege|权限不够|无权限/i.test(message)) {
+    return { status: 503, code: 'DB_UNAVAILABLE', message: '数据库暂不可用，请检查 DB 配置、schema 权限后重试。' };
+  }
   return { status: 500, code: 'INTERNAL_ERROR', message: '服务暂时不可用，请稍后重试。' };
 }
 
@@ -38,6 +44,7 @@ export const handleAppShellRoutes: RouteHandler = async (context, services) => {
       const response = await appShellService.sendLoginCode(asString(body.phone));
       writeJson(context.res, 200, response);
     } catch (error) {
+      console.error('[app-shell] send-code failed:', error instanceof Error ? error.message : String(error));
       const mapped = mapError(error);
       writeJson(context.res, mapped.status, mapped);
     }
@@ -53,6 +60,7 @@ export const handleAppShellRoutes: RouteHandler = async (context, services) => {
       });
       writeJson(context.res, 200, response);
     } catch (error) {
+      console.error('[app-shell] login failed:', error instanceof Error ? error.message : String(error));
       const mapped = mapError(error);
       writeJson(context.res, mapped.status, mapped);
     }
@@ -69,6 +77,7 @@ export const handleAppShellRoutes: RouteHandler = async (context, services) => {
       });
       writeJson(context.res, 200, profile);
     } catch (error) {
+      console.error('[app-shell] profile setup failed:', error instanceof Error ? error.message : String(error));
       const mapped = mapError(error);
       writeJson(context.res, mapped.status, mapped);
     }

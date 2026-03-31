@@ -34,12 +34,14 @@ const config = process.env.APP_DB_URL
 (async () => {
   const client = new Client(config);
   await client.connect();
-  const result = await client.query(sql);
-  if (result.rows.length === 1 && Object.keys(result.rows[0]).length === 1) {
-    const value = Object.values(result.rows[0])[0];
+  const queryResult = await client.query(sql);
+  const result = Array.isArray(queryResult) ? queryResult[queryResult.length - 1] : queryResult;
+  const rows = Array.isArray(result?.rows) ? result.rows : [];
+  if (rows.length === 1 && Object.keys(rows[0]).length === 1) {
+    const value = Object.values(rows[0])[0];
     process.stdout.write(value == null ? '' : String(value));
   } else {
-    process.stdout.write(JSON.stringify(result.rows));
+    process.stdout.write(JSON.stringify(rows));
   }
   await client.end();
 })().catch((error) => {
