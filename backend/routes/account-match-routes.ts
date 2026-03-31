@@ -24,9 +24,6 @@ export const handleAccountMatchRoutes: RouteHandler = async (context, services) 
         tagLine: typeof body.tag_line === 'string' ? body.tag_line : undefined,
       }
     );
-    if (region === 'INTERNATIONAL' && account.accountId.startsWith('riot-mock-')) {
-      throw new Error('REAL_ACCOUNT_LINK_DISABLED: Riot real provider is not enabled. Set RIOT_PROVIDER_ENABLED=true.');
-    }
     writeJson(context.res, 200, account);
     return true;
   }

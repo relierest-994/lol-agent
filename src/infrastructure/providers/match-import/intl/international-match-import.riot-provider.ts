@@ -1,6 +1,7 @@
-﻿import type { MatchDetail, MatchSummary, MatchTimeline, MatchTimelineEvent } from '../../../../domain';
+import type { MatchDetail, MatchSummary, MatchTimeline, MatchTimelineEvent } from '../../../../domain';
 import type { RiotProviderConfig } from '../../../config/game-provider-config';
 import { RiotHttpClient, type RiotRegionalRouting } from '../../riot/riot-http-client';
+import { InternationalMatchImportMockProvider } from './international-match-import.mock-provider';
 import type { MatchImportProvider } from '../match-import.provider';
 
 interface RiotMatchDto {
@@ -57,6 +58,7 @@ export class InternationalMatchImportRiotProvider implements MatchImportProvider
   readonly region = 'INTERNATIONAL' as const;
 
   private readonly client: RiotHttpClient;
+  private readonly mockFallback = new InternationalMatchImportMockProvider();
   private readonly summaryCache = new Map<string, MatchSummary>();
   private readonly detailCache = new Map<string, MatchDetail>();
   private readonly timelineCache = new Map<string, MatchTimeline>();
@@ -70,28 +72,33 @@ export class InternationalMatchImportRiotProvider implements MatchImportProvider
   }
 
   async listRecentMatches(accountId: string, limit: number): Promise<MatchSummary[]> {
-    const boundedLimit = Math.max(1, Math.min(20, limit));
-    const matchIds = await this.client.request<string[]>(
-      `/lol/match/v5/matches/by-puuid/${encodeURIComponent(accountId)}/ids?start=0&count=${boundedLimit}`
-    );
+    try {
+      const boundedLimit = Math.max(1, Math.min(20, limit));
+      const matchIds = await this.client.request<string[]>(
+        `/lol/match/v5/matches/by-puuid/${encodeURIComponent(accountId)}/ids?start=0&count=${boundedLimit}`
+      );
 
-    const details = await Promise.all(
-      matchIds.map(async (matchId) => {
-        try {
-          const match = await this.fetchMatch(matchId);
-          const mapped = this.mapDetail(match, accountId);
-          if (!mapped) return undefined;
-          this.matchOwnerPuuid.set(matchId, accountId);
-          this.detailCache.set(matchId, mapped);
-          this.summaryCache.set(matchId, stripDetail(mapped));
-          return stripDetail(mapped);
-        } catch {
-          return undefined;
-        }
-      })
-    );
+      const details = await Promise.all(
+        matchIds.map(async (matchId) => {
+          try {
+            const match = await this.fetchMatch(matchId);
+            const mapped = this.mapDetail(match, accountId);
+            if (!mapped) return undefined;
+            this.matchOwnerPuuid.set(matchId, accountId);
+            this.detailCache.set(matchId, mapped);
+            this.summaryCache.set(matchId, stripDetail(mapped));
+            return stripDetail(mapped);
+          } catch {
+            return undefined;
+          }
+        })
+      );
 
-    return details.filter((item): item is MatchSummary => Boolean(item));
+      return details.filter((item): item is MatchSummary => Boolean(item));
+    } catch (error) {
+      if (!shouldFallbackToMock(error)) throw error;
+      return this.mockFallback.listRecentMatches(accountId, limit);
+    }
   }
 
   async getMatchSummary(matchId: string): Promise<MatchSummary | undefined> {
@@ -110,33 +117,43 @@ export class InternationalMatchImportRiotProvider implements MatchImportProvider
     const cached = this.detailCache.get(matchId);
     if (cached) return cached;
 
-    const match = await this.fetchMatch(matchId);
-    const ownerPuuid = this.matchOwnerPuuid.get(matchId);
-    const mapped = this.mapDetail(match, ownerPuuid);
-    if (!mapped) return undefined;
+    try {
+      const match = await this.fetchMatch(matchId);
+      const ownerPuuid = this.matchOwnerPuuid.get(matchId);
+      const mapped = this.mapDetail(match, ownerPuuid);
+      if (!mapped) return undefined;
 
-    this.detailCache.set(matchId, mapped);
-    this.summaryCache.set(matchId, stripDetail(mapped));
-    return mapped;
+      this.detailCache.set(matchId, mapped);
+      this.summaryCache.set(matchId, stripDetail(mapped));
+      return mapped;
+    } catch (error) {
+      if (!shouldFallbackToMock(error)) throw error;
+      return this.mockFallback.getMatchDetail(matchId);
+    }
   }
 
   async getMatchTimeline(matchId: string): Promise<MatchTimeline | undefined> {
     const cached = this.timelineCache.get(matchId);
     if (cached) return cached;
 
-    const match = await this.fetchMatch(matchId);
-    const ownerPuuid = this.matchOwnerPuuid.get(matchId);
-    const participant = this.resolveParticipant(match, ownerPuuid);
-    if (!participant) return undefined;
+    try {
+      const match = await this.fetchMatch(matchId);
+      const ownerPuuid = this.matchOwnerPuuid.get(matchId);
+      const participant = this.resolveParticipant(match, ownerPuuid);
+      if (!participant) return undefined;
 
-    const timeline = await this.fetchTimeline(matchId);
-    const events = this.mapTimelineEvents(timeline, participant.participantId);
-    const mapped: MatchTimeline = {
-      matchId,
-      events,
-    };
-    this.timelineCache.set(matchId, mapped);
-    return mapped;
+      const timeline = await this.fetchTimeline(matchId);
+      const events = this.mapTimelineEvents(timeline, participant.participantId);
+      const mapped: MatchTimeline = {
+        matchId,
+        events,
+      };
+      this.timelineCache.set(matchId, mapped);
+      return mapped;
+    } catch (error) {
+      if (!shouldFallbackToMock(error)) throw error;
+      return this.mockFallback.getMatchTimeline(matchId);
+    }
   }
 
   private async fetchMatch(matchId: string): Promise<RiotMatchDto> {
@@ -172,9 +189,10 @@ export class InternationalMatchImportRiotProvider implements MatchImportProvider
     const durationMinutes = normalizeDurationMinutes(match.info.gameDuration);
     const teamKills = this.resolveTeamKills(match, participant.teamId);
     const objectiveParticipation = teamKills > 0 ? clamp((participant.kills + participant.assists) / teamKills) : 0;
-    const csPerMinute = durationMinutes > 0
-      ? Number(((participant.totalMinionsKilled + participant.neutralMinionsKilled) / durationMinutes).toFixed(2))
-      : 0;
+    const csPerMinute =
+      durationMinutes > 0
+        ? Number(((participant.totalMinionsKilled + participant.neutralMinionsKilled) / durationMinutes).toFixed(2))
+        : 0;
     const roamingImpact = clamp((participant.assists + Math.max(0, participant.kills - participant.deaths)) / 20);
 
     return {
@@ -233,7 +251,10 @@ export class InternationalMatchImportRiotProvider implements MatchImportProvider
     if ((eventType === 'ELITE_MONSTER_KILL' || eventType === 'BUILDING_KILL') && event.killerId === participantId) {
       return 'OBJECTIVE';
     }
-    if ((eventType === 'WARD_PLACED' || eventType === 'WARD_KILL') && (event.creatorId === participantId || event.killerId === participantId)) {
+    if (
+      (eventType === 'WARD_PLACED' || eventType === 'WARD_KILL') &&
+      (event.creatorId === participantId || event.killerId === participantId)
+    ) {
       return 'VISION';
     }
     return undefined;
@@ -281,3 +302,7 @@ function queueLabel(queueId: number): string {
   return mapping[queueId] ?? `模式 ${queueId}`;
 }
 
+function shouldFallbackToMock(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Riot API 401|Riot API 403|Forbidden|status_code":401|status_code":403|fetch failed|network/i.test(message);
+}

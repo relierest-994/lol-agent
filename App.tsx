@@ -639,6 +639,13 @@ function AppInner(props: {
     );
   }
 
+  function renderMainTabContent(): React.ReactElement {
+    if (mainTab === 'HOME') return renderHome();
+    if (mainTab === 'HEROES') return renderHeroes();
+    if (mainTab === 'DATA_CENTER') return renderDataCenter();
+    return renderMine();
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="dark" />
@@ -696,28 +703,34 @@ function AppInner(props: {
 
       {overlayPage === 'MAIN' ? (
         <View style={styles.mainLayout}>
-          <View style={styles.mainPane}>
-            <View style={styles.topTabs}>
-              <Pressable style={[styles.topTabBtn, mainTab === 'HOME' ? styles.topTabBtnActive : undefined]} onPress={() => setMainTab('HOME')}>
-                <Text style={[styles.topTabText, mainTab === 'HOME' ? styles.topTabTextActive : undefined]}>首页</Text>
-              </Pressable>
-              <Pressable style={[styles.topTabBtn, mainTab === 'HEROES' ? styles.topTabBtnActive : undefined]} onPress={() => setMainTab('HEROES')}>
-                <Text style={[styles.topTabText, mainTab === 'HEROES' ? styles.topTabTextActive : undefined]}>英雄</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.topTabBtn, mainTab === 'DATA_CENTER' ? styles.topTabBtnActive : undefined]}
-                onPress={() => setMainTab('DATA_CENTER')}
-              >
-                <Text style={[styles.topTabText, mainTab === 'DATA_CENTER' ? styles.topTabTextActive : undefined]}>数据中心</Text>
-              </Pressable>
-              <Pressable style={[styles.topTabBtn, mainTab === 'MINE' ? styles.topTabBtnActive : undefined]} onPress={() => setMainTab('MINE')}>
-                <Text style={[styles.topTabText, mainTab === 'MINE' ? styles.topTabTextActive : undefined]}>我的</Text>
-              </Pressable>
-            </View>
-            {mainTab === 'HOME' ? renderHome() : null}
-            {mainTab === 'HEROES' ? renderHeroes() : null}
-            {mainTab === 'DATA_CENTER' ? renderDataCenter() : null}
-            {mainTab === 'MINE' ? renderMine() : null}
+          <View style={styles.topTabs}>
+            <Pressable style={[styles.topTabBtn, mainTab === 'HOME' ? styles.topTabBtnActive : undefined]} onPress={() => setMainTab('HOME')}>
+              <Text style={[styles.topTabText, mainTab === 'HOME' ? styles.topTabTextActive : undefined]}>首页</Text>
+            </Pressable>
+            <Pressable style={[styles.topTabBtn, mainTab === 'HEROES' ? styles.topTabBtnActive : undefined]} onPress={() => setMainTab('HEROES')}>
+              <Text style={[styles.topTabText, mainTab === 'HEROES' ? styles.topTabTextActive : undefined]}>英雄</Text>
+            </Pressable>
+            <Pressable style={[styles.topTabBtn, mainTab === 'DATA_CENTER' ? styles.topTabBtnActive : undefined]} onPress={() => setMainTab('DATA_CENTER')}>
+              <Text style={[styles.topTabText, mainTab === 'DATA_CENTER' ? styles.topTabTextActive : undefined]}>数据中心</Text>
+            </Pressable>
+            <Pressable style={[styles.topTabBtn, mainTab === 'MINE' ? styles.topTabBtnActive : undefined]} onPress={() => setMainTab('MINE')}>
+              <Text style={[styles.topTabText, mainTab === 'MINE' ? styles.topTabTextActive : undefined]}>我的</Text>
+            </Pressable>
+          </View>
+          <View style={styles.mainPane}>{renderMainTabContent()}</View>
+          <View style={styles.bottomTabs}>
+            <Pressable style={styles.bottomTabItem} onPress={() => setMainTab('HOME')} hitSlop={8}>
+              <Text style={[styles.bottomTabText, mainTab === 'HOME' ? styles.bottomTabTextActive : undefined]}>首页</Text>
+            </Pressable>
+            <Pressable style={styles.bottomTabItem} onPress={() => setMainTab('HEROES')} hitSlop={8}>
+              <Text style={[styles.bottomTabText, mainTab === 'HEROES' ? styles.bottomTabTextActive : undefined]}>英雄</Text>
+            </Pressable>
+            <Pressable style={styles.bottomTabItem} onPress={() => setMainTab('DATA_CENTER')} hitSlop={8}>
+              <Text style={[styles.bottomTabText, mainTab === 'DATA_CENTER' ? styles.bottomTabTextActive : undefined]}>数据中心</Text>
+            </Pressable>
+            <Pressable style={styles.bottomTabItem} onPress={() => setMainTab('MINE')} hitSlop={8}>
+              <Text style={[styles.bottomTabText, mainTab === 'MINE' ? styles.bottomTabTextActive : undefined]}>我的</Text>
+            </Pressable>
           </View>
         </View>
       ) : null}
