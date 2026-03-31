@@ -1354,7 +1354,7 @@ export class AppShellService {
       spotlight,
       compared,
     });
-    this.homeCache = {
+    const home = {
       version,
       previousVersion,
       generatedAt: new Date().toISOString(),
