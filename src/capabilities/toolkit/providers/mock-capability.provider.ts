@@ -172,12 +172,17 @@ export class MockCapabilityProvider implements CapabilityProvider {
     limit: number
   ): Promise<{ summaries: MatchSummary[]; details: MatchDetail[] }> {
     const list = await this.matchUseCase.listRecent({ region, accountId, limit });
-    const details = await Promise.all(
-      list.matches.map(async (item) => {
-        const bundle = await this.matchUseCase.getMatchBundle(region, item.matchId);
-        return bundle.detail;
-      })
-    );
+    const provider = this.registries.matchRegistry.get(region);
+    const details: MatchDetail[] = [];
+    for (const item of list.matches) {
+      try {
+        // listRecent 已经预热了 detail 缓存；这里只读取详情，不触发 timeline 请求。
+        const detail = await provider.getMatchDetail(item.matchId);
+        if (detail) details.push(detail);
+      } catch {
+        // 单场详情失败不应阻断整批最近战绩。
+      }
+    }
     return { summaries: list.matches, details };
   }
 
