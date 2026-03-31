@@ -1,7 +1,6 @@
 import type { MatchDetail, MatchSummary, MatchTimeline, MatchTimelineEvent } from '../../../../domain';
 import type { RiotProviderConfig } from '../../../config/game-provider-config';
 import { RiotHttpClient, type RiotRegionalRouting } from '../../riot/riot-http-client';
-import { InternationalMatchImportMockProvider } from './international-match-import.mock-provider';
 import type { MatchImportProvider } from '../match-import.provider';
 
 interface RiotMatchDto {
@@ -58,7 +57,6 @@ export class InternationalMatchImportRiotProvider implements MatchImportProvider
   readonly region = 'INTERNATIONAL' as const;
 
   private readonly client: RiotHttpClient;
-  private readonly mockFallback = new InternationalMatchImportMockProvider();
   private readonly summaryCache = new Map<string, MatchSummary>();
   private readonly detailCache = new Map<string, MatchDetail>();
   private readonly timelineCache = new Map<string, MatchTimeline>();
@@ -96,8 +94,9 @@ export class InternationalMatchImportRiotProvider implements MatchImportProvider
 
       return details.filter((item): item is MatchSummary => Boolean(item));
     } catch (error) {
-      if (!shouldFallbackToMock(error)) throw error;
-      return this.mockFallback.listRecentMatches(accountId, limit);
+      const detail = error instanceof Error ? error.message : String(error);
+      if (/Riot API 404|status_code\":404/i.test(detail)) return [];
+      throw new Error(`Failed to list recent Riot matches for account ${accountId}: ${detail}`);
     }
   }
 
@@ -127,8 +126,8 @@ export class InternationalMatchImportRiotProvider implements MatchImportProvider
       this.summaryCache.set(matchId, stripDetail(mapped));
       return mapped;
     } catch (error) {
-      if (!shouldFallbackToMock(error)) throw error;
-      return this.mockFallback.getMatchDetail(matchId);
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to fetch Riot match detail ${matchId}: ${detail}`);
     }
   }
 
@@ -151,8 +150,8 @@ export class InternationalMatchImportRiotProvider implements MatchImportProvider
       this.timelineCache.set(matchId, mapped);
       return mapped;
     } catch (error) {
-      if (!shouldFallbackToMock(error)) throw error;
-      return this.mockFallback.getMatchTimeline(matchId);
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to fetch Riot match timeline ${matchId}: ${detail}`);
     }
   }
 
@@ -300,9 +299,4 @@ function queueLabel(queueId: number): string {
     1700: '斗魂竞技场',
   };
   return mapping[queueId] ?? `模式 ${queueId}`;
-}
-
-function shouldFallbackToMock(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /Riot API 401|Riot API 403|Forbidden|status_code":401|status_code":403|fetch failed|network/i.test(message);
 }

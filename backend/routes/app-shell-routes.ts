@@ -26,6 +26,12 @@ function mapError(error: unknown): { status: number; code: string; message: stri
   if (message === 'HERO_NOT_FOUND') {
     return { status: 404, code: message, message: '未找到该英雄，请刷新后重试。' };
   }
+  if (message === 'ITEM_NOT_FOUND') {
+    return { status: 404, code: message, message: '未找到该装备，请刷新后重试。' };
+  }
+  if (message === 'RUNE_NOT_FOUND') {
+    return { status: 404, code: message, message: '未找到该天赋，请刷新后重试。' };
+  }
   if (/schema .* does not exist|不存在|relation .* does not exist|未找到关系/i.test(message)) {
     return { status: 503, code: 'DB_SCHEMA_MISSING', message: '数据库 schema 或数据表不存在，请先建库建表。' };
   }
@@ -114,7 +120,8 @@ export const handleAppShellRoutes: RouteHandler = async (context, services) => {
 
   if (context.method === 'GET' && context.path === 'app/heroes') {
     const position = asString(context.url.searchParams.get('position'), 'ALL') as 'TOP' | 'JUNGLE' | 'MID' | 'ADC' | 'SUPPORT' | 'ALL';
-    const data = await appShellService.getHeroesDashboard({ position });
+    const changeTag = asString(context.url.searchParams.get('change_tag'), 'ALL') as 'ALL' | 'BUFF' | 'NERF' | 'NEUTRAL';
+    const data = await appShellService.getHeroesDashboard({ position, changeTag });
     writeJson(context.res, 200, data);
     return true;
   }
@@ -126,6 +133,48 @@ export const handleAppShellRoutes: RouteHandler = async (context, services) => {
       writeJson(context.res, 404, {
         code: 'HERO_NOT_FOUND',
         message: '未找到该英雄，请刷新后重试。',
+      });
+      return true;
+    }
+    writeJson(context.res, 200, detail);
+    return true;
+  }
+
+  if (context.method === 'GET' && context.path === 'app/items') {
+    const changeTag = asString(context.url.searchParams.get('change_tag'), 'ALL') as 'ALL' | 'BUFF' | 'NERF' | 'NEUTRAL';
+    const data = await appShellService.getItemsDashboard({ changeTag });
+    writeJson(context.res, 200, data);
+    return true;
+  }
+
+  if (context.method === 'GET' && context.path.startsWith('app/items/')) {
+    const itemId = decodeURIComponent(context.path.slice('app/items/'.length));
+    const detail = await appShellService.getItemDetail({ itemId });
+    if (!detail) {
+      writeJson(context.res, 404, {
+        code: 'ITEM_NOT_FOUND',
+        message: '未找到该装备，请刷新后重试。',
+      });
+      return true;
+    }
+    writeJson(context.res, 200, detail);
+    return true;
+  }
+
+  if (context.method === 'GET' && context.path === 'app/runes') {
+    const changeTag = asString(context.url.searchParams.get('change_tag'), 'ALL') as 'ALL' | 'BUFF' | 'NERF' | 'NEUTRAL';
+    const data = await appShellService.getRunesDashboard({ changeTag });
+    writeJson(context.res, 200, data);
+    return true;
+  }
+
+  if (context.method === 'GET' && context.path.startsWith('app/runes/')) {
+    const runeId = decodeURIComponent(context.path.slice('app/runes/'.length));
+    const detail = await appShellService.getRuneDetail({ runeId });
+    if (!detail) {
+      writeJson(context.res, 404, {
+        code: 'RUNE_NOT_FOUND',
+        message: '未找到该天赋，请刷新后重试。',
       });
       return true;
     }

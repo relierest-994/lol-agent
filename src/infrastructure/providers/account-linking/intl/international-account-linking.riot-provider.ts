@@ -2,7 +2,6 @@ import type { LinkedAccount } from '../../../../domain';
 import type { RiotProviderConfig } from '../../../config/game-provider-config';
 import { createPersistentStateStore } from '../../../persistence/persistent-state.store';
 import { RiotHttpClient, type RiotRegionalRouting } from '../../riot/riot-http-client';
-import { InternationalAccountLinkingMockProvider } from './international-account-linking.mock-provider';
 import type { AccountLinkingProvider, LinkAccountRequest } from '../account-linking.provider';
 
 interface RiotAccountByIdResponse {
@@ -17,7 +16,6 @@ export class InternationalAccountLinkingRiotProvider implements AccountLinkingPr
 
   private readonly store = createPersistentStateStore('account-link-intl');
   private readonly client: RiotHttpClient;
-  private readonly mockFallback = new InternationalAccountLinkingMockProvider();
 
   constructor(config: RiotProviderConfig, regionalRouting: RiotRegionalRouting) {
     this.client = new RiotHttpClient({
@@ -67,15 +65,11 @@ export class InternationalAccountLinkingRiotProvider implements AccountLinkingPr
       this.store.write(`account:${userId}`, linked);
       return linked;
     } catch (error) {
-      if (!shouldFallbackToMock(error)) throw error;
-      const linked = await this.mockFallback.linkAccountMock(userId, request);
-      this.store.write(`account:${userId}`, linked);
-      return linked;
+      const detail = error instanceof Error ? error.message : String(error);
+      if (/status_code\":404|Riot API 404|not found/i.test(detail)) {
+        throw new Error(`Riot account not found: ${gameName}#${tagLine}. Please verify gameName and tagLine.`);
+      }
+      throw new Error(`Riot account link failed for ${gameName}#${tagLine}: ${detail}`);
     }
   }
-}
-
-function shouldFallbackToMock(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /Riot API 401|Riot API 403|Forbidden|status_code\":401|status_code\":403|fetch failed|network/i.test(message);
 }
