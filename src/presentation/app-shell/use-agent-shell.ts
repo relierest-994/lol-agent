@@ -435,18 +435,19 @@ export function useAgentShell(userId: string) {
     setChatAttachment(undefined);
   }
 
-  async function linkAccount(): Promise<boolean> {
-    if (linkingAccount) return false;
+  async function linkAccount(): Promise<{ ok: boolean; message?: string }> {
+    if (linkingAccount) return { ok: false, message: '账号绑定进行中，请稍候。' };
     if (region === 'INTERNATIONAL' && (!riotGameName.trim() || !riotTagLine.trim())) {
+      const message = '国际服绑定需要填写 Riot ID（gameName）和 TagLine。';
       setUiAlerts([
         {
           level: 'WARN',
           code: 'ACCOUNT_INPUT_REQUIRED',
-          message: '国际服绑定需要填写 Riot ID（gameName）和 TagLine。',
+          message,
           retryable: false,
         },
       ]);
-      return false;
+      return { ok: false, message };
     }
     setLinkingAccount(true);
     try {
@@ -466,17 +467,18 @@ export function useAgentShell(userId: string) {
           retryable: false,
         },
       ]);
-      return true;
+      return { ok: true };
     } catch (error) {
+      const message = error instanceof Error ? error.message : '账号绑定失败';
       setUiAlerts([
         {
           level: 'ERROR',
           code: 'ACCOUNT_LINK_FAILED',
-          message: error instanceof Error ? error.message : '账号绑定失败',
+          message,
           retryable: true,
         },
       ]);
-      return false;
+      return { ok: false, message };
     } finally {
       setLinkingAccount(false);
     }

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { type AppProfileDto } from './src/application';
+import { getProfileUseCase, type AppProfileDto } from './src/application';
 import { AppInnerShell } from './src/presentation/app-shell/components/app-inner-shell';
 import { LoginPage } from './src/presentation/app-shell/components/auth/login-page';
 import { ProfileSetupModal } from './src/presentation/app-shell/components/auth/profile-setup-modal';
@@ -36,7 +36,28 @@ export default function App(): React.ReactElement {
       setProfileModalVisible(false);
       return;
     }
-    setProfileModalVisible(!session.profileCompleted);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const profile = await getProfileUseCase(session.userId);
+        if (cancelled) return;
+        setSession((prev) => {
+          if (!prev) return prev;
+          if (prev.nickname === profile.nickname && prev.avatarUrl === profile.avatarUrl && prev.profileCompleted === profile.profileCompleted) {
+            return prev;
+          }
+          return { ...prev, nickname: profile.nickname, avatarUrl: profile.avatarUrl, profileCompleted: profile.profileCompleted };
+        });
+        setProfileModalVisible(!profile.profileCompleted || !profile.nickname?.trim());
+      } catch {
+        if (!cancelled) {
+          setProfileModalVisible(!session.profileCompleted || !session.nickname?.trim());
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [session]);
 
   function handleProfileDone(profile: AppProfileDto): void {
@@ -136,7 +157,7 @@ const styles = StyleSheet.create({
     borderRadius: 100,
     backgroundColor: '#E6EEFF',
   },
-  pageBody: { padding: 16, gap: 12, paddingBottom: 92 },
+  pageBody: { padding: 16, gap: 12, paddingBottom: 92, flexGrow: 1 },
   loginHero: {
     margin: 16,
     padding: 18,
@@ -210,6 +231,9 @@ const styles = StyleSheet.create({
   itemTitle: { color: '#21345C', fontSize: 14, fontWeight: '800' },
   itemSub: { color: '#4F6696', fontSize: 12, fontWeight: '700' },
   itemDesc: { color: '#6279A6', fontSize: 12, lineHeight: 18 },
+  homeHeroRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
+  homeHeroAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E4ECFF' },
+  homeHeroBody: { flex: 1, gap: 2 },
   metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   metricCard: {
     width: '48%',
@@ -278,7 +302,16 @@ const styles = StyleSheet.create({
   modalTitle: { color: '#233256', fontSize: 18, fontWeight: '900' },
   modalDesc: { color: '#61739A', fontSize: 13, lineHeight: 18 },
   mainLayout: { flex: 1 },
-  mainPane: { flex: 1 },
+  mainPane: { flex: 1, minHeight: 0 },
+  bottomTabDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 68,
+    zIndex: 100,
+    elevation: 20,
+  },
   positionChip: {
     borderRadius: 999,
     borderWidth: 1,

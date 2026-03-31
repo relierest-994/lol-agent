@@ -42,6 +42,41 @@ interface HomeVersionUpdate {
   source: 'DATA_DRAGON_LLM' | 'DATA_DRAGON_RULE';
 }
 
+interface HomeInsightItem {
+  championId: string;
+  championName: string;
+  avatarUrl: string;
+  summary: string;
+}
+
+interface HomeHeroChangeItem {
+  championId: string;
+  championName: string;
+  avatarUrl: string;
+  statDelta: string;
+  skillDelta?: string;
+}
+
+interface HomeItemChangeItem {
+  itemId: string;
+  itemName: string;
+  iconUrl: string;
+  changeSummary: string;
+}
+
+interface HomeRuneChangeItem {
+  runeId: string;
+  runeName: string;
+  iconUrl: string;
+  changeSummary: string;
+}
+
+interface HomeVersionReport {
+  heroChanges: HomeHeroChangeItem[];
+  itemChanges: HomeItemChangeItem[];
+  runeChanges: HomeRuneChangeItem[];
+}
+
 type HeroPosition = 'TOP' | 'JUNGLE' | 'MID' | 'ADC' | 'SUPPORT' | 'ALL';
 type HeroChangeTag = 'BUFF' | 'NERF' | 'NEUTRAL';
 
@@ -393,6 +428,40 @@ function sumNumbers(values: number[]): number {
   return values.reduce((acc, cur) => acc + cur, 0);
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function stripHtmlTags(input: string): string {
+  return input
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function formatDelta(current: number, previous: number): string {
+  const delta = Number((current - previous).toFixed(2));
+  if (delta === 0) return '0';
+  return delta > 0 ? `+${delta}` : String(delta);
+}
+
+const HERO_STAT_LABELS: Record<string, string> = {
+  hp: '生命值',
+  hpperlevel: '每级生命成长',
+  mp: '法力值',
+  mpperlevel: '每级法力成长',
+  armor: '护甲',
+  armorperlevel: '每级护甲成长',
+  attackdamage: '攻击力',
+  attackdamageperlevel: '每级攻击力成长',
+};
+
 function inferItemChangeTag(
   current: DataDragonItem,
   previous?: DataDragonItem
@@ -435,6 +504,9 @@ export class AppShellService {
     generatedAt: string;
     updates: HomeVersionUpdate[];
     spotlight: string[];
+    buffHighlights: HomeInsightItem[];
+    nerfHighlights: HomeInsightItem[];
+    report: HomeVersionReport;
     sourceNotice: string;
   };
   private heroCache?: {
@@ -521,6 +593,23 @@ export class AppShellService {
         created_at TIMESTAMPTZ NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL,
         PRIMARY KEY (user_id, region)
+      );
+
+      CREATE TABLE IF NOT EXISTS ${appShellTable('app_version_change_reports')} (
+        version TEXT PRIMARY KEY,
+        previous_version TEXT,
+        report_json JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS ${appShellTable('app_ddragon_payload_cache')} (
+        cache_type TEXT NOT NULL,
+        version TEXT NOT NULL,
+        payload_json JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (cache_type, version)
       );
     `);
     this.dbTablesReady = true;
@@ -778,22 +867,87 @@ export class AppShellService {
     return state.usersById[userId];
   }
 
-  async getHomeDashboard(_userId: string): Promise<{
+  async getHomeDashboard(_userId: string, versionOverride?: string): Promise<{
     latestVersion: string;
     previousVersion?: string;
     updates: HomeVersionUpdate[];
     spotlight: string[];
+    buffHighlights: HomeInsightItem[];
+    nerfHighlights: HomeInsightItem[];
+    report: HomeVersionReport;
     sourceNotice: string;
     generatedAt: string;
   }> {
-    const home = await this.refreshHomeDashboard();
+    let home:
+      | {
+          version: string;
+          previousVersion?: string;
+          generatedAt: string;
+          updates: HomeVersionUpdate[];
+          spotlight: string[];
+          buffHighlights: HomeInsightItem[];
+          nerfHighlights: HomeInsightItem[];
+          sourceNotice: string;
+        }
+      | undefined;
+    try {
+      home = await this.refreshHomeDashboard(versionOverride);
+    } catch (error) {
+      console.warn('[app-shell][home] refresh failed, fallback to cache', {
+        error: errorMessage(error),
+      });
+      home = this.homeCache;
+    }
+    if (!home) {
+      const nowIso = new Date().toISOString();
+      home = {
+        version: 'unknown',
+        previousVersion: undefined,
+        generatedAt: nowIso,
+        spotlight: ['版本数据暂不可用', '请稍后重试', '已启用兜底内容'],
+        buffHighlights: [],
+        nerfHighlights: [],
+        report: { heroChanges: [], itemChanges: [], runeChanges: [] },
+        updates: [
+          {
+            id: 'fallback-1',
+            title: '版本数据加载中',
+            detail: 'Data Dragon 暂不可用，正在使用兜底内容。',
+            patch: 'unknown',
+            publishedAt: nowIso,
+            source: 'DATA_DRAGON_RULE',
+          },
+        ],
+        sourceNotice: '版本数据来源暂不可用，已启用兜底内容。',
+      };
+    }
     return {
       latestVersion: home.version,
       previousVersion: home.previousVersion,
       updates: home.updates,
       spotlight: home.spotlight,
+      buffHighlights: home.buffHighlights,
+      nerfHighlights: home.nerfHighlights,
+      report: home.report,
       sourceNotice: home.sourceNotice,
       generatedAt: home.generatedAt,
+    };
+  }
+
+  async getHomeVersionHistory(limit = 30): Promise<{
+    latestVersion: string;
+    versions: Array<{ version: string; previousVersion?: string; cached: boolean }>;
+  }> {
+    const { versions } = await this.loadVersionList();
+    const cached = new Set(this.listCachedReportVersionsFromDb(200).map((item) => item.version));
+    const list = versions.slice(0, Math.max(5, Math.min(limit, 120))).map((version, index) => ({
+      version,
+      previousVersion: versions[index + 1],
+      cached: cached.has(version),
+    }));
+    return {
+      latestVersion: versions[0] ?? 'unknown',
+      versions: list,
     };
   }
 
@@ -819,11 +973,15 @@ export class AppShellService {
     let linkedRegion: Region = 'INTERNATIONAL';
 
     for (const region of regions) {
-      const account = await this.provider.getLinkedAccount(userId, region);
-      if (account) {
-        linkedAccount = account;
-        linkedRegion = region;
-        break;
+      try {
+        const account = await this.provider.getLinkedAccount(userId, region);
+        if (account) {
+          linkedAccount = account;
+          linkedRegion = region;
+          break;
+        }
+      } catch {
+        continue;
       }
     }
 
@@ -965,7 +1123,7 @@ export class AppShellService {
     const passive: HeroSpellDetail = {
       id: `${champion.id}-passive`,
       name: passiveRaw?.name ?? '被动技能',
-      description: passiveRaw?.description ?? '暂无被动技能说明',
+      description: stripHtmlTags(passiveRaw?.description ?? '暂无被动技能说明'),
       iconUrl: passiveRaw?.image?.full
         ? `https://ddragon.leagueoflegends.com/cdn/${snapshot.version}/img/passive/${passiveRaw.image.full}`
         : avatarUrl,
@@ -974,12 +1132,17 @@ export class AppShellService {
     const spells: HeroSpellDetail[] = spellsRaw.map((item) => ({
       id: item.id,
       name: item.name,
-      description: item.description,
+      description: stripHtmlTags(item.description),
       iconUrl: `https://ddragon.leagueoflegends.com/cdn/${snapshot.version}/img/spell/${item.image.full}`,
       cooldown: item.cooldownBurn,
       cost: item.costBurn,
       range: item.rangeBurn,
     }));
+    const stats: Record<string, number> = {};
+    Object.entries(champion.stats).forEach(([key, value]) => {
+      const label = HERO_STAT_LABELS[key] ?? key;
+      stats[label] = value;
+    });
 
     return {
       version: snapshot.version,
@@ -988,12 +1151,12 @@ export class AppShellService {
         championId: champion.id,
         name: champion.name,
         title: champion.title,
-        lore: champion.lore ?? champion.blurb ?? '暂无英雄背景故事',
+        lore: stripHtmlTags(champion.lore ?? champion.blurb ?? '暂无英雄背景故事'),
         avatarUrl,
         positions: mapTagsToPositions(champion.tags),
         latestChangeTag: change.tag,
         latestChangeSummary: change.summary,
-        stats: champion.stats,
+        stats,
         passive,
         spells,
       },
@@ -1011,7 +1174,7 @@ export class AppShellService {
         return {
           itemId,
           name: current.name ?? `装备 ${itemId}`,
-          plainText: current.plaintext ?? '暂无描述',
+          plainText: stripHtmlTags(current.plaintext ?? '暂无描述'),
           iconUrl: `https://ddragon.leagueoflegends.com/cdn/${snapshot.version}/img/item/${itemId}.png`,
           latestChangeTag: change.tag,
           latestChangeSummary: change.summary,
@@ -1040,8 +1203,8 @@ export class AppShellService {
       item: {
         itemId: input.itemId,
         name: current.name ?? `装备 ${input.itemId}`,
-        plainText: current.plaintext ?? '暂无描述',
-        description: current.description ?? '暂无描述',
+        plainText: stripHtmlTags(current.plaintext ?? '暂无描述'),
+        description: stripHtmlTags(current.description ?? '暂无描述'),
         iconUrl: `https://ddragon.leagueoflegends.com/cdn/${snapshot.version}/img/item/${input.itemId}.png`,
         goldTotal: current.gold?.total ?? 0,
         goldSell: current.gold?.sell ?? 0,
@@ -1098,8 +1261,8 @@ export class AppShellService {
         name: current.name,
         tree: current.tree,
         iconUrl: `https://ddragon.leagueoflegends.com/cdn/img/${current.icon}`,
-        shortDesc: current.shortDesc,
-        longDesc: current.longDesc,
+        shortDesc: stripHtmlTags(current.shortDesc),
+        longDesc: stripHtmlTags(current.longDesc),
         latestChangeTag: change.tag,
         latestChangeSummary: change.summary,
       },
@@ -1107,31 +1270,83 @@ export class AppShellService {
     };
   }
 
-  private async refreshHomeDashboard(): Promise<{
+  private async refreshHomeDashboard(versionOverride?: string): Promise<{
     version: string;
     previousVersion?: string;
     generatedAt: string;
     updates: HomeVersionUpdate[];
     spotlight: string[];
+    buffHighlights: HomeInsightItem[];
+    nerfHighlights: HomeInsightItem[];
+    report: HomeVersionReport;
     sourceNotice: string;
   }> {
-    const { version, previousVersion } = await this.loadLatestVersions();
-    if (this.homeCache && this.homeCache.version === version && this.homeCache.previousVersion === previousVersion) {
+    const { versions } = await this.loadVersionList();
+    const version = versionOverride && versions.includes(versionOverride) ? versionOverride : versions[0];
+    const previousVersion = version ? versions[versions.indexOf(version) + 1] : undefined;
+    if (!version) throw new Error('VERSIONS_EMPTY');
+
+    if (!versionOverride && this.homeCache && this.homeCache.version === version && this.homeCache.previousVersion === previousVersion) {
       return this.homeCache;
     }
 
-    const currentPayload = await this.fetchChampionPayload(version);
-    const previousPayload = previousVersion ? await this.fetchChampionPayload(previousVersion) : undefined;
+    const cachedReport = this.readVersionReportFromDb(version);
+    if (cachedReport && cachedReport.previousVersion === previousVersion) {
+      if (!versionOverride) this.homeCache = cachedReport;
+      return cachedReport;
+    }
+
+    const currentPayload = await this.fetchChampionPayloadCached(version);
+    const previousPayload = previousVersion ? await this.fetchChampionPayloadCached(previousVersion) : undefined;
+    const currentItems = await this.fetchItemPayloadCached(version);
+    const previousItems = previousVersion ? await this.fetchItemPayloadCached(previousVersion) : { data: {} };
+    const currentRunes = await this.fetchRunePayloadCached(version);
+    const previousRunes = previousVersion ? await this.fetchRunePayloadCached(previousVersion) : [];
     const compared = Object.values(currentPayload.data).map((champion) => {
       const previous = previousPayload?.data?.[champion.id];
       const change = inferChampionChangeTag(champion, previous);
-      return { champion: champion.name, tag: change.tag, summary: change.summary };
+      return {
+        championId: champion.id,
+        champion: champion.name,
+        tag: change.tag,
+        summary: change.summary,
+        avatarUrl: `https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${champion.image.full}`,
+      };
     });
     const spotlight = [
       `增强：${compared.filter((item) => item.tag === 'BUFF').slice(0, 6).map((item) => item.champion).join('、') || '暂无明显增强'}`,
       `削弱：${compared.filter((item) => item.tag === 'NERF').slice(0, 6).map((item) => item.champion).join('、') || '暂无明显削弱'}`,
       `中性：${compared.filter((item) => item.tag === 'NEUTRAL').length} 位`,
     ];
+
+    const buffHighlights: HomeInsightItem[] = compared
+      .filter((item) => item.tag === 'BUFF')
+      .slice(0, 8)
+      .map((item) => ({
+        championId: item.championId,
+        championName: item.champion,
+        avatarUrl: item.avatarUrl,
+        summary: item.summary,
+      }));
+    const nerfHighlights: HomeInsightItem[] = compared
+      .filter((item) => item.tag === 'NERF')
+      .slice(0, 8)
+      .map((item) => ({
+        championId: item.championId,
+        championName: item.champion,
+        avatarUrl: item.avatarUrl,
+        summary: item.summary,
+      }));
+    const report = this.buildHomeVersionReport({
+      version,
+      previousVersion,
+      currentChampions: currentPayload,
+      previousChampions: previousPayload,
+      currentItems,
+      previousItems,
+      currentRunes,
+      previousRunes,
+    });
 
     const updates = await this.generateHomeUpdatesWithLlm({
       version,
@@ -1145,19 +1360,33 @@ export class AppShellService {
       generatedAt: new Date().toISOString(),
       updates,
       spotlight,
+      buffHighlights,
+      nerfHighlights,
+      report,
       sourceNotice:
         updates[0]?.source === 'DATA_DRAGON_LLM'
           ? '版本变动由 Data Dragon 差异 + LLM 结构化生成。'
           : '版本变动由 Data Dragon 差异规则生成（LLM 不可用时自动降级）。',
     };
-    return this.homeCache;
+    this.writeVersionReportToDb({
+      version,
+      previousVersion,
+      updates,
+      spotlight,
+      buffHighlights,
+      nerfHighlights,
+      report,
+      sourceNotice: home.sourceNotice,
+    });
+    if (!versionOverride) this.homeCache = home;
+    return home;
   }
 
   private async generateHomeUpdatesWithLlm(input: {
     version: string;
     previousVersion?: string;
     spotlight: string[];
-    compared: Array<{ champion: string; tag: HeroChangeTag; summary: string }>;
+    compared: Array<{ championId: string; champion: string; tag: HeroChangeTag; summary: string; avatarUrl: string }>;
   }): Promise<HomeVersionUpdate[]> {
     const nowIso = new Date().toISOString();
     const fallback = this.generateRuleHomeUpdates(input, nowIso);
@@ -1208,12 +1437,172 @@ export class AppShellService {
     }
   }
 
+  private readPayloadCacheFromDb<T>(cacheType: 'champions' | 'items' | 'runes', version: string): T | undefined {
+    if (!this.dbModeEnabled || !this.dbWriteAvailable) return undefined;
+    try {
+      this.ensureAppShellTables();
+      const rowsRaw = execPsql(`
+        SELECT payload_json::text AS payload
+        FROM ${appShellTable('app_ddragon_payload_cache')}
+        WHERE cache_type = ${safeSqlString(cacheType)}
+          AND version = ${safeSqlString(version)}
+        LIMIT 1;
+      `);
+      const rows = parseJsonRows<{ payload: string }>(rowsRaw);
+      const payloadText = rows[0]?.payload;
+      if (!payloadText) return undefined;
+      return JSON.parse(payloadText) as T;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private writePayloadCacheToDb(cacheType: 'champions' | 'items' | 'runes', version: string, payload: unknown): void {
+    if (!this.dbModeEnabled || !this.dbWriteAvailable) return;
+    try {
+      this.ensureAppShellTables();
+      const payloadText = JSON.stringify(payload ?? {}).replace(/'/g, "''");
+      execPsql(`
+        INSERT INTO ${appShellTable('app_ddragon_payload_cache')} (
+          cache_type, version, payload_json, created_at, updated_at
+        ) VALUES (
+          ${safeSqlString(cacheType)},
+          ${safeSqlString(version)},
+          '${payloadText}'::jsonb,
+          NOW(),
+          NOW()
+        )
+        ON CONFLICT (cache_type, version)
+        DO UPDATE SET
+          payload_json = EXCLUDED.payload_json,
+          updated_at = NOW();
+      `);
+    } catch {
+      this.dbWriteAvailable = false;
+    }
+  }
+
+  private readVersionReportFromDb(version: string): {
+    version: string;
+    previousVersion?: string;
+    generatedAt: string;
+    updates: HomeVersionUpdate[];
+    spotlight: string[];
+    buffHighlights: HomeInsightItem[];
+    nerfHighlights: HomeInsightItem[];
+    report: HomeVersionReport;
+    sourceNotice: string;
+  } | undefined {
+    if (!this.dbModeEnabled || !this.dbWriteAvailable) return undefined;
+    try {
+      this.ensureAppShellTables();
+      const rowsRaw = execPsql(`
+        SELECT
+          version,
+          previous_version,
+          report_json::text AS report_json,
+          updated_at::text AS updated_at
+        FROM ${appShellTable('app_version_change_reports')}
+        WHERE version = ${safeSqlString(version)}
+        LIMIT 1;
+      `);
+      const rows = parseJsonRows<{ version: string; previous_version: string | null; report_json: string; updated_at: string }>(rowsRaw);
+      const row = rows[0];
+      if (!row?.report_json) return undefined;
+      const parsed = JSON.parse(row.report_json) as {
+        updates?: HomeVersionUpdate[];
+        spotlight?: string[];
+        buffHighlights?: HomeInsightItem[];
+        nerfHighlights?: HomeInsightItem[];
+        report?: HomeVersionReport;
+        sourceNotice?: string;
+      };
+      return {
+        version: row.version,
+        previousVersion: row.previous_version ?? undefined,
+        generatedAt: row.updated_at,
+        updates: parsed.updates ?? [],
+        spotlight: parsed.spotlight ?? [],
+        buffHighlights: parsed.buffHighlights ?? [],
+        nerfHighlights: parsed.nerfHighlights ?? [],
+        report: parsed.report ?? { heroChanges: [], itemChanges: [], runeChanges: [] },
+        sourceNotice: parsed.sourceNotice ?? '版本变动来自缓存数据库。',
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private writeVersionReportToDb(input: {
+    version: string;
+    previousVersion?: string;
+    updates: HomeVersionUpdate[];
+    spotlight: string[];
+    buffHighlights: HomeInsightItem[];
+    nerfHighlights: HomeInsightItem[];
+    report: HomeVersionReport;
+    sourceNotice: string;
+  }): void {
+    if (!this.dbModeEnabled || !this.dbWriteAvailable) return;
+    try {
+      this.ensureAppShellTables();
+      const payloadText = JSON.stringify({
+        updates: input.updates,
+        spotlight: input.spotlight,
+        buffHighlights: input.buffHighlights,
+        nerfHighlights: input.nerfHighlights,
+        report: input.report,
+        sourceNotice: input.sourceNotice,
+      }).replace(/'/g, "''");
+
+      execPsql(`
+        INSERT INTO ${appShellTable('app_version_change_reports')} (
+          version, previous_version, report_json, created_at, updated_at
+        ) VALUES (
+          ${safeSqlString(input.version)},
+          ${input.previousVersion ? safeSqlString(input.previousVersion) : 'NULL'},
+          '${payloadText}'::jsonb,
+          NOW(),
+          NOW()
+        )
+        ON CONFLICT (version)
+        DO UPDATE SET
+          previous_version = EXCLUDED.previous_version,
+          report_json = EXCLUDED.report_json,
+          updated_at = NOW();
+      `);
+    } catch {
+      this.dbWriteAvailable = false;
+    }
+  }
+
+  private listCachedReportVersionsFromDb(limit = 40): Array<{ version: string; previousVersion?: string; updatedAt: string }> {
+    if (!this.dbModeEnabled || !this.dbWriteAvailable) return [];
+    try {
+      this.ensureAppShellTables();
+      const rowsRaw = execPsql(`
+        SELECT version, previous_version, updated_at::text AS updated_at
+        FROM ${appShellTable('app_version_change_reports')}
+        ORDER BY updated_at DESC
+        LIMIT ${Math.max(1, Math.min(limit, 200))};
+      `);
+      const rows = parseJsonRows<{ version: string; previous_version: string | null; updated_at: string }>(rowsRaw);
+      return rows.map((row) => ({
+        version: row.version,
+        previousVersion: row.previous_version ?? undefined,
+        updatedAt: row.updated_at,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   private generateRuleHomeUpdates(
     input: {
       version: string;
       previousVersion?: string;
       spotlight: string[];
-      compared: Array<{ champion: string; tag: HeroChangeTag; summary: string }>;
+      compared: Array<{ championId: string; champion: string; tag: HeroChangeTag; summary: string; avatarUrl: string }>;
     },
     nowIso: string
   ): HomeVersionUpdate[] {
@@ -1264,14 +1653,157 @@ export class AppShellService {
     ];
   }
 
+  private buildHomeVersionReport(input: {
+    version: string;
+    previousVersion?: string;
+    currentChampions: DataDragonChampionsPayload;
+    previousChampions?: DataDragonChampionsPayload;
+    currentItems: DataDragonItemsPayload;
+    previousItems?: DataDragonItemsPayload;
+    currentRunes: DataDragonRuneTree[];
+    previousRunes: DataDragonRuneTree[];
+  }): HomeVersionReport {
+    const heroChanges: HomeHeroChangeItem[] = Object.values(input.currentChampions.data)
+      .map((champion) => {
+        const prev = input.previousChampions?.data?.[champion.id];
+        if (!prev) return undefined;
+        const statParts: string[] = [];
+        (['attackdamage', 'attackdamageperlevel', 'hp', 'hpperlevel', 'armor', 'armorperlevel', 'mp', 'mpperlevel'] as const).forEach((key) => {
+          const curVal = champion.stats[key];
+          const prevVal = prev.stats[key];
+          if (curVal !== prevVal) {
+            statParts.push(`${HERO_STAT_LABELS[key]} ${formatDelta(curVal, prevVal)}`);
+          }
+        });
+        const currentSpells = Array.isArray(champion.spells) ? champion.spells : [];
+        const prevSpells = Array.isArray(prev.spells) ? prev.spells : [];
+        const changedSkills = currentSpells
+          .filter((spell, index) => spell.description !== prevSpells[index]?.description)
+          .map((spell) => spell.name);
+        if (statParts.length === 0 && changedSkills.length === 0) return undefined;
+        return {
+          championId: champion.id,
+          championName: champion.name,
+          avatarUrl: `https://ddragon.leagueoflegends.com/cdn/${input.version}/img/champion/${champion.image.full}`,
+          statDelta: statParts.join('；') || '基础数值无明显变动',
+          skillDelta: changedSkills.length ? `技能调整：${changedSkills.join('、')}` : undefined,
+        } as HomeHeroChangeItem;
+      })
+      .filter((item): item is HomeHeroChangeItem => Boolean(item))
+      .slice(0, 20);
+
+    const itemChanges: HomeItemChangeItem[] = Object.entries(input.currentItems.data)
+      .map(([itemId, item]) => {
+        const prev = input.previousItems?.data?.[itemId];
+        if (!prev) return undefined;
+        const change = inferItemChangeTag(item, prev);
+        const hasTextDiff = (item.plaintext ?? '') !== (prev.plaintext ?? '') || (item.description ?? '') !== (prev.description ?? '');
+        const hasGoldDiff = (item.gold?.total ?? 0) !== (prev.gold?.total ?? 0) || (item.gold?.sell ?? 0) !== (prev.gold?.sell ?? 0);
+        if (!hasTextDiff && !hasGoldDiff) return undefined;
+        return {
+          itemId,
+          itemName: item.name ?? `装备 ${itemId}`,
+          iconUrl: `https://ddragon.leagueoflegends.com/cdn/${input.version}/img/item/${itemId}.png`,
+          changeSummary: change.summary,
+        } as HomeItemChangeItem;
+      })
+      .filter((item): item is HomeItemChangeItem => Boolean(item))
+      .slice(0, 20);
+
+    const toRuneMap = (trees: DataDragonRuneTree[]) => {
+      const map: Record<string, DataDragonRune> = {};
+      for (const tree of trees) {
+        for (const slot of tree.slots) {
+          for (const rune of slot.runes) {
+            map[String(rune.id)] = rune;
+          }
+        }
+      }
+      return map;
+    };
+    const currentRuneMap = toRuneMap(input.currentRunes);
+    const prevRuneMap = toRuneMap(input.previousRunes);
+    const runeChanges: HomeRuneChangeItem[] = Object.values(currentRuneMap)
+      .map((rune) => {
+        const prev = prevRuneMap[String(rune.id)];
+        if (!prev) return undefined;
+        const change = inferRuneChangeTag(rune, prev);
+        if (rune.shortDesc === prev.shortDesc && rune.longDesc === prev.longDesc) return undefined;
+        return {
+          runeId: String(rune.id),
+          runeName: rune.name,
+          iconUrl: `https://ddragon.leagueoflegends.com/cdn/img/${rune.icon}`,
+          changeSummary: change.summary,
+        } as HomeRuneChangeItem;
+      })
+      .filter((item): item is HomeRuneChangeItem => Boolean(item))
+      .slice(0, 20);
+
+    return { heroChanges, itemChanges, runeChanges };
+  }
+
+  private async loadVersionList(): Promise<{ versions: string[] }> {
+    const url = 'https://ddragon.leagueoflegends.com/api/versions.json';
+    try {
+      const versionResponse = await fetch(url);
+      if (!versionResponse.ok) {
+        console.warn('[app-shell][home] versions fetch non-200', {
+          url,
+          status: versionResponse.status,
+          statusText: versionResponse.statusText,
+        });
+        throw new Error(`VERSIONS_FETCH_FAILED_${versionResponse.status}`);
+      }
+      const versions = (await versionResponse.json()) as string[];
+      const version = versions[0];
+      if (!version) {
+        console.warn('[app-shell][home] versions payload empty', { url, size: versions.length });
+        throw new Error('VERSIONS_EMPTY');
+      }
+      console.log('[app-shell][home] versions resolved', {
+        latestVersion: version,
+        previousVersion: versions[1] ?? null,
+        total: versions.length,
+      });
+      return { versions };
+    } catch (error) {
+      console.error('[app-shell][home] versions fetch failed', {
+        url,
+        error: errorMessage(error),
+      });
+      throw error;
+    }
+  }
+
   private async loadLatestVersions(): Promise<{ version: string; previousVersion?: string }> {
-    const versionResponse = await fetch('https://ddragon.leagueoflegends.com/api/versions.json');
-    if (!versionResponse.ok) throw new Error(`VERSIONS_FETCH_FAILED_${versionResponse.status}`);
-    const versions = (await versionResponse.json()) as string[];
+    const { versions } = await this.loadVersionList();
     const version = versions[0];
-    const previousVersion = versions[1];
     if (!version) throw new Error('VERSIONS_EMPTY');
-    return { version, previousVersion };
+    return { version, previousVersion: versions[1] };
+  }
+
+  private async fetchChampionPayloadCached(version: string): Promise<DataDragonChampionsPayload> {
+    const cached = this.readPayloadCacheFromDb<DataDragonChampionsPayload>('champions', version);
+    if (cached?.data) return cached;
+    const payload = await this.fetchChampionPayload(version);
+    this.writePayloadCacheToDb('champions', version, payload);
+    return payload;
+  }
+
+  private async fetchItemPayloadCached(version: string): Promise<DataDragonItemsPayload> {
+    const cached = this.readPayloadCacheFromDb<DataDragonItemsPayload>('items', version);
+    if (cached?.data) return cached;
+    const payload = await this.fetchItemPayload(version);
+    this.writePayloadCacheToDb('items', version, payload);
+    return payload;
+  }
+
+  private async fetchRunePayloadCached(version: string): Promise<DataDragonRuneTree[]> {
+    const cached = this.readPayloadCacheFromDb<DataDragonRuneTree[]>('runes', version);
+    if (Array.isArray(cached) && cached.length > 0) return cached;
+    const payload = await this.fetchRunePayload(version);
+    this.writePayloadCacheToDb('runes', version, payload);
+    return payload;
   }
 
   private async loadHeroSnapshot(): Promise<{
@@ -1287,8 +1819,8 @@ export class AppShellService {
     }
 
     const { version, previousVersion } = await this.loadLatestVersions();
-    const currentPayload = await this.fetchChampionPayload(version);
-    const previousPayload = previousVersion ? await this.fetchChampionPayload(previousVersion) : undefined;
+    const currentPayload = await this.fetchChampionPayloadCached(version);
+    const previousPayload = previousVersion ? await this.fetchChampionPayloadCached(previousVersion) : undefined;
 
     const snapshot = {
       cachedAt: now,
@@ -1315,8 +1847,8 @@ export class AppShellService {
     }
 
     const { version, previousVersion } = await this.loadLatestVersions();
-    const currentPayload = await this.fetchItemPayload(version);
-    const previousPayload = previousVersion ? await this.fetchItemPayload(previousVersion) : undefined;
+    const currentPayload = await this.fetchItemPayloadCached(version);
+    const previousPayload = previousVersion ? await this.fetchItemPayloadCached(previousVersion) : undefined;
     const snapshot = {
       cachedAt: now,
       version,
@@ -1342,8 +1874,8 @@ export class AppShellService {
     }
 
     const { version, previousVersion } = await this.loadLatestVersions();
-    const currentPayload = await this.fetchRunePayload(version);
-    const previousPayload = previousVersion ? await this.fetchRunePayload(previousVersion) : [];
+    const currentPayload = await this.fetchRunePayloadCached(version);
+    const previousPayload = previousVersion ? await this.fetchRunePayloadCached(previousVersion) : [];
     const toRuneMap = (trees: DataDragonRuneTree[]) => {
       const map: Record<string, DataDragonRune & { tree: string }> = {};
       for (const tree of trees) {
@@ -1368,9 +1900,30 @@ export class AppShellService {
   }
 
   private async fetchChampionPayload(version: string): Promise<DataDragonChampionsPayload> {
-    const response = await fetch(`https://ddragon.leagueoflegends.com/cdn/${version}/data/zh_CN/champion.json`);
-    if (!response.ok) throw new Error(`CHAMPION_FETCH_FAILED_${response.status}`);
-    return (await response.json()) as DataDragonChampionsPayload;
+    const url = `https://ddragon.leagueoflegends.com/cdn/${version}/data/zh_CN/champion.json`;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.warn('[app-shell][home] champion fetch non-200', {
+          version,
+          url,
+          status: response.status,
+          statusText: response.statusText,
+        });
+        throw new Error(`CHAMPION_FETCH_FAILED_${response.status}`);
+      }
+      const payload = (await response.json()) as DataDragonChampionsPayload;
+      const count = Object.keys(payload.data ?? {}).length;
+      console.log('[app-shell][home] champion payload loaded', { version, count });
+      return payload;
+    } catch (error) {
+      console.error('[app-shell][home] champion fetch failed', {
+        version,
+        url,
+        error: errorMessage(error),
+      });
+      throw error;
+    }
   }
 
   private async fetchItemPayload(version: string): Promise<DataDragonItemsPayload> {

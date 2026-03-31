@@ -17,8 +17,50 @@ export interface HomeDashboardResponse {
   previousVersion?: string;
   updates: HomeVersionUpdate[];
   spotlight: string[];
+  buffHighlights: Array<{
+    championId: string;
+    championName: string;
+    avatarUrl: string;
+    summary: string;
+  }>;
+  nerfHighlights: Array<{
+    championId: string;
+    championName: string;
+    avatarUrl: string;
+    summary: string;
+  }>;
+  report: {
+    heroChanges: Array<{
+      championId: string;
+      championName: string;
+      avatarUrl: string;
+      statDelta: string;
+      skillDelta?: string;
+    }>;
+    itemChanges: Array<{
+      itemId: string;
+      itemName: string;
+      iconUrl: string;
+      changeSummary: string;
+    }>;
+    runeChanges: Array<{
+      runeId: string;
+      runeName: string;
+      iconUrl: string;
+      changeSummary: string;
+    }>;
+  };
   sourceNotice: string;
   generatedAt: string;
+}
+
+export interface HomeVersionHistoryResponse {
+  latestVersion: string;
+  versions: Array<{
+    version: string;
+    previousVersion?: string;
+    cached: boolean;
+  }>;
 }
 
 export interface DataCenterResponse {
@@ -157,9 +199,16 @@ export interface RuneDetailResponse {
   sourceNotice: string;
 }
 
-export async function getHomeDashboardUseCase(userId: string): Promise<HomeDashboardResponse> {
+export async function getHomeDashboardUseCase(userId: string, version?: string): Promise<HomeDashboardResponse> {
+  const versionQuery = version ? `&version=${encodeURIComponent(version)}` : '';
   return callBackendApi<HomeDashboardResponse>({
-    path: `app/dashboard/home?user_id=${encodeURIComponent(userId)}`,
+    path: `app/dashboard/home?user_id=${encodeURIComponent(userId)}${versionQuery}`,
+  });
+}
+
+export async function getHomeVersionHistoryUseCase(userId: string, limit = 30): Promise<HomeVersionHistoryResponse> {
+  return callBackendApi<HomeVersionHistoryResponse>({
+    path: `app/dashboard/home/history?user_id=${encodeURIComponent(userId)}&limit=${encodeURIComponent(String(limit))}`,
   });
 }
 

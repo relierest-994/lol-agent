@@ -1,4 +1,4 @@
-import type React from 'react';
+﻿import type React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export type MainTab = 'HOME' | 'HEROES' | 'DATA_CENTER' | 'MINE';
@@ -33,6 +33,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     height: 68,
     paddingBottom: 8,
+    zIndex: 200,
+    elevation: 30,
   },
   bottomTabItem: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   bottomTabText: { color: '#5A6E97', fontWeight: '700', fontSize: 13 },

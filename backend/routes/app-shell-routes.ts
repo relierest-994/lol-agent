@@ -106,7 +106,16 @@ export const handleAppShellRoutes: RouteHandler = async (context, services) => {
 
   if (context.method === 'GET' && context.path === 'app/dashboard/home') {
     const userId = asString(context.url.searchParams.get('user_id'));
-    const data = await appShellService.getHomeDashboard(userId);
+    const version = asString(context.url.searchParams.get('version'));
+    const data = await appShellService.getHomeDashboard(userId, version || undefined);
+    writeJson(context.res, 200, data);
+    return true;
+  }
+
+  if (context.method === 'GET' && context.path === 'app/dashboard/home/history') {
+    const limitRaw = Number(asString(context.url.searchParams.get('limit'), '30'));
+    const limit = Number.isFinite(limitRaw) ? limitRaw : 30;
+    const data = await appShellService.getHomeVersionHistory(limit);
     writeJson(context.res, 200, data);
     return true;
   }
