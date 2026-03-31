@@ -95,6 +95,9 @@ export class InternationalMatchImportRiotProvider implements MatchImportProvider
       return details.filter((item): item is MatchSummary => Boolean(item));
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
+      if (/Riot API 400/i.test(detail) && /Exception decrypting/i.test(detail)) {
+        throw new Error(`INVALID_MATCH_ACCOUNT_ID: account ${accountId} is not a valid Riot puuid for match-v5`);
+      }
       if (/Riot API 404|status_code\":404/i.test(detail)) return [];
       throw new Error(`Failed to list recent Riot matches for account ${accountId}: ${detail}`);
     }

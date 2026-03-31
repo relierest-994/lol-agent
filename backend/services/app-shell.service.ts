@@ -432,6 +432,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function hasHomeReportContent(input: {
+  updates?: HomeVersionUpdate[];
+  spotlight?: string[];
+  report?: HomeVersionReport;
+}): boolean {
+  const updatesCount = input.updates?.length ?? 0;
+  const spotlightCount = input.spotlight?.length ?? 0;
+  const heroCount = input.report?.heroChanges?.length ?? 0;
+  const itemCount = input.report?.itemChanges?.length ?? 0;
+  const runeCount = input.report?.runeChanges?.length ?? 0;
+  return updatesCount > 0 || spotlightCount > 0 || heroCount > 0 || itemCount > 0 || runeCount > 0;
+}
+
 function stripHtmlTags(input: string): string {
   return input
     .replace(/<[^>]+>/g, ' ')
@@ -1014,7 +1027,34 @@ export class AppShellService {
       nowIso: new Date().toISOString(),
     });
 
-    const recent = await this.provider.listRecentMatches(linkedRegion, linkedAccount.accountId, 10);
+    let recent: Awaited<ReturnType<CapabilityProvider['listRecentMatches']>>;
+    try {
+      recent = await this.provider.listRecentMatches(linkedRegion, linkedAccount.accountId, 10);
+    } catch (error) {
+      const message = errorMessage(error);
+      const invalidAccountId = /INVALID_MATCH_ACCOUNT_ID|Exception decrypting|Riot API 400/i.test(message);
+      return {
+        stats: {
+          recentWinRate: 0,
+          rankTrend: 'FLAT',
+          wins: 0,
+          losses: 0,
+          kda: '0.00',
+        },
+        charts: {
+          winRateTrend: [],
+          kdaTrend: [],
+          killsTrend: [],
+          deathsTrend: [],
+        },
+        narrative: invalidAccountId
+          ? '当前绑定账号的历史标识已失效，请重新绑定游戏账号后再查看数据中心。'
+          : '数据中心暂时不可用，请稍后重试。',
+        keyInsights: invalidAccountId
+          ? ['检测到账号标识不是有效 puuid', '请在“我的”页重新绑定账号', '重新绑定后会恢复最近对局统计']
+          : ['最近对局拉取失败', '可稍后重试', message],
+      };
+    }
     const summaries = recent.summaries;
     const wins = summaries.filter((item) => item.outcome === 'WIN').length;
     const losses = summaries.length - wins;
@@ -1286,12 +1326,22 @@ export class AppShellService {
     const previousVersion = version ? versions[versions.indexOf(version) + 1] : undefined;
     if (!version) throw new Error('VERSIONS_EMPTY');
 
-    if (!versionOverride && this.homeCache && this.homeCache.version === version && this.homeCache.previousVersion === previousVersion) {
+    if (
+      !versionOverride &&
+      this.homeCache &&
+      this.homeCache.version === version &&
+      this.homeCache.previousVersion === previousVersion &&
+      hasHomeReportContent(this.homeCache)
+    ) {
       return this.homeCache;
     }
 
     const cachedReport = this.readVersionReportFromDb(version);
-    if (cachedReport && cachedReport.previousVersion === previousVersion) {
+    if (
+      cachedReport &&
+      cachedReport.previousVersion === previousVersion &&
+      hasHomeReportContent(cachedReport)
+    ) {
       if (!versionOverride) this.homeCache = cachedReport;
       return cachedReport;
     }
