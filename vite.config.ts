@@ -7,6 +7,16 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    resolve: {
+      alias: [{ find: /^react-native$/, replacement: 'react-native-web' }],
+    },
+    optimizeDeps: {
+      esbuildOptions: {
+        define: {
+          global: 'globalThis',
+        },
+      },
+    },
     define: {
       __VITE_ENV__: JSON.stringify(viteEnv),
     },

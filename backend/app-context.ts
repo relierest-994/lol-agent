@@ -1,9 +1,10 @@
-import type { CapabilityProvider } from '../src/capabilities/toolkit';
+﻿import type { CapabilityProvider } from '../src/capabilities/toolkit';
 import { loadEnvFiles } from './config/load-env-files';
 import { loadBackendRuntimeMode } from './config/backend-runtime-mode';
 import { getDbHealth, type DbHealthStatus } from './db/db-readiness';
 import { insertAgentTaskRun } from './db/psql-client';
 import { installDbBackedLocalStorage } from './db/node-local-storage-db';
+import { AppShellService } from './services/app-shell.service';
 
 export interface BackendAppContext {
   orchestrator: {
@@ -16,6 +17,7 @@ export interface BackendAppContext {
     }) => Promise<unknown>;
   };
   provider: CapabilityProvider;
+  appShellService: AppShellService;
   paymentWebhookService: {
     createCheckout: (input: {
       user_id: string;
@@ -70,10 +72,13 @@ export async function createBackendAppContext(): Promise<BackendAppContext> {
 
   // Backend is the local orchestration entrypoint and should not call itself over HTTP.
   const provider: CapabilityProvider = new MockCapabilityProvider();
+  const appShellService = new AppShellService(provider, runtimeMode);
+  await appShellService.seedFromDb();
 
   return {
     orchestrator: new AgentOrchestrator(),
     provider,
+    appShellService,
     paymentWebhookService,
     runQueueTick: () => getLocalJobQueueRuntime().processDueJobs(),
     runtimeMode,
@@ -96,3 +101,4 @@ export async function createBackendAppContext(): Promise<BackendAppContext> {
     },
   };
 }
+

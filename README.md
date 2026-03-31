@@ -443,3 +443,53 @@ Docs:
 - `docs/phase3-real-infra.md`
 - `.env.example`
 - `migrations/20260330_phase3_real_infra_schema.sql`
+
+## 20) App Shell Auth + Tabs (Increment)
+
+Mobile `App.tsx` shell now supports:
+
+- Phone + verification code login (`app/auth/send-code`, `app/auth/login`)
+- Auto-register on first login
+- First-login profile completion modal (nickname required, avatar optional with default)
+- Bottom tabs: 首页 / 数据中心 / 我的
+- 我的页面按纵向信息流展示：账号信息 + 战绩列表（英雄头像、KDA、胜负色）
+- Bind-account UX: binding modal closes immediately on click, then loading overlay appears
+
+Backend app-shell endpoints are handled in:
+
+- `backend/routes/app-shell-routes.ts`
+- `backend/services/app-shell.service.ts`
+
+Persistence migration:
+
+- `migrations/20260331_app_shell_auth_profile.sql`
+
+Version updates/data center source note:
+
+- Current home version-feed is `MOCK_RIOT_FEED` in phase scope.
+- Riot official news API is not wired in this increment; the endpoint returns mock updates with explicit source notice.
+
+Capability protocol note (main chain):
+
+- Agent main orchestration still uses the unified toolkit capability registry (`src/capabilities/toolkit/*`) with single capability-id naming.
+- This app-shell increment does not bypass or replace review capability flow; it only adds shell login/profile/dashboard surfaces.
+
+## 21) Hero Tab (Data Dragon)
+
+Mobile shell adds a new bottom tab: `英雄`.
+
+Backend endpoints:
+
+- `GET app/heroes?position=ALL|TOP|JUNGLE|MID|ADC|SUPPORT`
+- `GET app/heroes/{championId}`
+
+Data source:
+
+- Version list: `https://ddragon.leagueoflegends.com/api/versions.json`
+- Champion data: `https://ddragon.leagueoflegends.com/cdn/{version}/data/zh_CN/champion.json`
+
+Notes:
+
+- Hero avatar, passive, spells, and descriptions are from Data Dragon.
+- Buff/Nerf tags are inferred by comparing current vs previous version base stats (heuristic), and marked as inferred in `sourceNotice`.
+- If latest version list fetch fails, service falls back to a fixed version snapshot and returns neutral change tags.
